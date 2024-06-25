@@ -10,7 +10,18 @@ import sys
 from dataclasses import asdict, is_dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Literal, Mapping, Optional, TypeVar, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import lightning as L
 import torch
@@ -23,6 +34,7 @@ from lightning.fabric.utilities.load import _lazy_load as lazy_load
 from lightning.pytorch.loggers import WandbLogger
 from torch.serialization import normalize_storage_type
 from typing_extensions import Self
+import networkx as nx
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -60,11 +72,15 @@ def reset_parameters(module: nn.Module) -> None:
             mod.reset_parameters()
 
 
-def check_valid_checkpoint_dir(checkpoint_dir: Path, model_filename: str = "lit_model.pth") -> None:
+def check_valid_checkpoint_dir(
+    checkpoint_dir: Path, model_filename: str = "lit_model.pth"
+) -> None:
     files = {
         model_filename: (checkpoint_dir / model_filename).is_file(),
         "model_config.yaml": (checkpoint_dir / "model_config.yaml").is_file(),
-        "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file()
+        "tokenizer.json OR tokenizer.model": (
+            checkpoint_dir / "tokenizer.json"
+        ).is_file()
         or (checkpoint_dir / "tokenizer.model").is_file(),
         "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
     }
@@ -79,7 +95,9 @@ def check_valid_checkpoint_dir(checkpoint_dir: Path, model_filename: str = "lit_
     # list locally available checkpoints
     available = list(Path("checkpoints").glob("*/*"))
     if available:
-        options = "\n --checkpoint_dir ".join([""] + [repr(str(p.resolve())) for p in available])
+        options = "\n --checkpoint_dir ".join(
+            [""] + [repr(str(p.resolve())) for p in available]
+        )
         extra = f"\nYou have downloaded locally:{options}\n"
     else:
         extra = ""
@@ -115,7 +133,13 @@ class SavingProxyForStorage:
         storage_key = saver._write_storage_and_return_key(storage)
         location = torch.serialization.location_tag(storage)
 
-        self.storage_info = ("storage", storage_type, storage_key, location, storage_numel)
+        self.storage_info = (
+            "storage",
+            storage_type,
+            storage_key,
+            location,
+            storage_numel,
+        )
 
     def __reduce_ex__(self, protocol_version):
         assert False, "this should be handled with out of band"
@@ -128,18 +152,28 @@ class SavingProxyForTensor:
         if reduce_args[0] == torch._utils._rebuild_tensor_v2:
             # for Tensors with Python attributes
             (a0, a1, (storage, *a2_other), *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (a0, a1, (storage_proxy, *a2_other), *other_reduce_args)
         else:
             (storage, *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (storage_proxy, *other_reduce_args)
 
     def __reduce_ex__(self, protocol_version):
         if protocol_version != self.protocol_version:
-            raise RuntimeError(f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}")
+            raise RuntimeError(
+                f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}"
+            )
         return self.reduce_ret_fn, self.reduce_args
 
 
@@ -262,30 +296,45 @@ def chunked_cross_entropy(
             logits = torch.cat(logits, dim=1)
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
-            return torch.nn.functional.cross_entropy(logits, targets, ignore_index=ignore_index)
+            return torch.nn.functional.cross_entropy(
+                logits, targets, ignore_index=ignore_index
+            )
 
         # chunk cross entropy
-        logit_chunks = [logit_chunk.reshape(-1, logit_chunk.size(-1)) for logit_chunk in logits]
-        target_chunks = [target_chunk.reshape(-1) for target_chunk in targets.split(logits[0].size(1), dim=1)]
+        logit_chunks = [
+            logit_chunk.reshape(-1, logit_chunk.size(-1)) for logit_chunk in logits
+        ]
+        target_chunks = [
+            target_chunk.reshape(-1)
+            for target_chunk in targets.split(logits[0].size(1), dim=1)
+        ]
         loss_chunks = [
-            torch.nn.functional.cross_entropy(logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none")
+            torch.nn.functional.cross_entropy(
+                logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none"
+            )
             for logit_chunk, target_chunk in zip(logit_chunks, target_chunks)
         ]
         non_masked_elems = (targets != ignore_index).sum()
         # See [non_masked_elems div note]
-        return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(torch.ones_like(non_masked_elems))
+        return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(
+            torch.ones_like(non_masked_elems)
+        )
 
     # no chunking at all
     logits = logits.reshape(-1, logits.size(-1))
     targets = targets.reshape(-1)
     if chunk_size == 0:
-        return torch.nn.functional.cross_entropy(logits, targets, ignore_index=ignore_index)
+        return torch.nn.functional.cross_entropy(
+            logits, targets, ignore_index=ignore_index
+        )
 
     # lm_head wasn't chunked, chunk cross entropy
     logit_chunks = logits.split(chunk_size)
     target_chunks = targets.split(chunk_size)
     loss_chunks = [
-        torch.nn.functional.cross_entropy(logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none")
+        torch.nn.functional.cross_entropy(
+            logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none"
+        )
         for logit_chunk, target_chunk in zip(logit_chunks, target_chunks)
     ]
     non_masked_elems = (targets != ignore_index).sum()
@@ -293,7 +342,9 @@ def chunked_cross_entropy(
     #   max(1, non_masked_elems) would be more ergonomic to avoid a division by zero. However that
     #   results in a python int which is then passed back to torch division. By using the
     #   `x.maximum(torch.ones_like(x))` pattern we avoid a cudaStreamSynchronize.
-    return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(torch.ones_like(non_masked_elems))
+    return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(
+        torch.ones_like(non_masked_elems)
+    )
 
 
 def map_old_state_dict_weights(state_dict: Dict, mapping: Mapping, prefix: str) -> Dict:
@@ -316,12 +367,16 @@ def get_default_supported_precision(training: bool) -> str:
     """
     from lightning.fabric.accelerators import MPSAccelerator
 
-    if MPSAccelerator.is_available() or (torch.cuda.is_available() and not torch.cuda.is_bf16_supported()):
+    if MPSAccelerator.is_available() or (
+        torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
+    ):
         return "16-mixed" if training else "16-true"
     return "bf16-mixed" if training else "bf16-true"
 
 
-def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
+def load_checkpoint(
+    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True
+) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
@@ -330,8 +385,12 @@ def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, s
         model.load_state_dict(state_dict, strict=strict)
 
 
-def flops_per_param(max_seq_length: int, n_layer: int, n_embd: int, n_params: int) -> int:
-    flops_per_token = 2 * n_params  # each parameter is used for a MAC (2 FLOPS) per network operation
+def flops_per_param(
+    max_seq_length: int, n_layer: int, n_embd: int, n_params: int
+) -> int:
+    flops_per_token = (
+        2 * n_params
+    )  # each parameter is used for a MAC (2 FLOPS) per network operation
     # this assumes that all samples have a fixed length equal to the block size
     # which is most likely false during finetuning
     flops_per_seq = flops_per_token * max_seq_length
@@ -352,12 +411,17 @@ def estimate_flops(model: "GPT", training: bool) -> int:
     # For a proper estimate, this needs a more fine-grained calculation as in Appendix A of the paper.
     n_trainable_params = num_parameters(model, requires_grad=True)
     trainable_flops = flops_per_param(
-        model.max_seq_length, model.config.n_layer, model.config.n_embd, n_trainable_params
+        model.max_seq_length,
+        model.config.n_layer,
+        model.config.n_embd,
+        n_trainable_params,
     )
     # forward + backward + gradients (assumes no gradient accumulation)
     ops_per_step = 3 if training else 1
     n_frozen_params = num_parameters(model, requires_grad=False)
-    frozen_flops = flops_per_param(model.max_seq_length, model.config.n_layer, model.config.n_embd, n_frozen_params)
+    frozen_flops = flops_per_param(
+        model.max_seq_length, model.config.n_layer, model.config.n_embd, n_frozen_params
+    )
     # forward + backward
     frozen_ops_per_step = 2 if training else 1
     return ops_per_step * trainable_flops + frozen_ops_per_step * frozen_flops
@@ -479,9 +543,30 @@ def choose_logger(
     **kwargs: Any,
 ):
     if logger_name == "csv":
-        return CSVLogger(root_dir=(out_dir / "logs"), name="csv", flush_logs_every_n_steps=log_interval, **kwargs)
+        return CSVLogger(
+            root_dir=(out_dir / "logs"),
+            name="csv",
+            flush_logs_every_n_steps=log_interval,
+            **kwargs,
+        )
     if logger_name == "tensorboard":
-        return TensorBoardLogger(root_dir=(out_dir / "logs"), name="tensorboard", **kwargs)
+        return TensorBoardLogger(
+            root_dir=(out_dir / "logs"), name="tensorboard", **kwargs
+        )
     if logger_name == "wandb":
         return WandbLogger(project=name, resume=resume, **kwargs)
-    raise ValueError(f"`--logger_name={logger_name}` is not a valid option. Choose from 'csv', 'tensorboard', 'wandb'.")
+    raise ValueError(
+        f"`--logger_name={logger_name}` is not a valid option. Choose from 'csv', 'tensorboard', 'wandb'."
+    )
+
+
+def recreate_graph(edge_list_str: str):
+    # Split the string into lines
+    edge_list_lines = edge_list_str.strip().split("\n")
+
+    # Create a list of edge tuples
+    edges = [tuple(map(int, line.split())) for line in edge_list_lines]
+
+    # Create a new graph and add the edges
+    G_loaded = nx.Graph()
+    G_loaded.add_edges_from(edges)

@@ -170,7 +170,13 @@ class Llama2FunctionCalling(PromptStyle):
                 "Search the web for content on Bing. This allows users to search online/the internet/the web for"
                 " content."
             ),
-            "arguments": [{"name": "query", "type": "string", "description": "The search query string"}],
+            "arguments": [
+                {
+                    "name": "query",
+                    "type": "string",
+                    "description": "The search query string",
+                }
+            ],
         }
 
         system_prompt = (
@@ -288,6 +294,11 @@ class Gemma(PromptStyle):
         return f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
 
 
+class AMR2Text(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<AMR>: {prompt}\n<text>:"
+
+
 # Maps prompt style names to PromptStyle classes
 prompt_styles: Dict[str, Type[PromptStyle]] = {
     # Dataset-specific prompt styles
@@ -312,6 +323,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "phi-2": Phi2,
     "tinyllama": TinyLlama,
     "gemma": Gemma,
+    "amr2text": AMR2Text,
 }
 
 
@@ -352,6 +364,8 @@ def model_name_to_prompt_style(model_name: str) -> PromptStyle:
         return TinyLlama()
     if re.search(r"(Code)?Gemma.*-it", model_name):
         return Gemma()
+    if re.search(r"AMR2Text", model_name):
+        return AMR2Text()
     return Default()
 
 
