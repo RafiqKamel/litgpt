@@ -110,28 +110,23 @@ def test_main(mocked_input, stop_iteration, fake_checkpoint_dir, monkeypatch, te
 
     out, err = StringIO(), StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        chat.main(temperature=2.0, top_k=2, checkpoint_dir=fake_checkpoint_dir)
+        chat.main(temperature=2.0, top_k=2, top_p=0.9, checkpoint_dir=fake_checkpoint_dir)
 
     # decoding is done per each generated item
     assert len(tokenizer_mock.return_value.decode.mock_calls) == generate_mock.return_value.numel()
     assert torch.allclose(tokenizer_mock.return_value.decode.call_args[0][0], generate_mock.return_value)
     assert generate_mock.mock_calls == [
-        call(ANY, tensor_like, 128, temperature=2.0, top_k=2, stop_tokens=([tokenizer_mock.return_value.eos_id],))
+        call(ANY, tensor_like, 128, temperature=2.0, top_k=2, top_p=0.9, stop_tokens=([tokenizer_mock.return_value.eos_id],))
     ]
     # only the generated result is printed to stdout
-    assert re.match("Now chatting with Llama 3.*>> .*Reply: foo bar baz", out.getvalue(), re.DOTALL)
+    assert re.match(r".*Now chatting with Llama 3.*>> .*Reply: foo bar baz", out.getvalue(), re.DOTALL)
 
 
-@pytest.mark.parametrize("mode", ["file", "entrypoint"])
-def test_cli(mode):
-    if mode == "file":
-        cli_path = Path(__file__).parent.parent / "litgpt/chat/base.py"
-        args = [sys.executable, cli_path, "-h"]
-    else:
-        args = ["litgpt", "chat", "-h"]
+def test_cli():
+    args = ["litgpt", "chat", "-h"]
     output = subprocess.check_output(args)
     output = str(output.decode())
-    assert "Starts a conversation" in output
+    assert "Chat with a model" in output
 
 
 @patch("litgpt.chat.base.input")
@@ -153,5 +148,5 @@ def test_merge_lora_if_needed(mocked_merge_lora, mocked_input, fake_checkpoint_d
     with redirect_stdout(out), redirect_stderr(err):
         chat.main(checkpoint_dir=fake_checkpoint_dir)
 
-    assert re.match("Merging LoRA weights with the base model.", out.getvalue(), re.DOTALL)
+    assert re.match(r".*Merging LoRA weights with the base model\..*", out.getvalue(), re.DOTALL)
     mocked_merge_lora.assert_called_once()

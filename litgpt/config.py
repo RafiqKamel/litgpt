@@ -92,11 +92,15 @@ class Config:
         self.rope_n_elem = int(self.rotary_percentage * self.head_size)
 
     @classmethod
-    def from_name(cls, name: str, **kwargs: Any) -> Self:
+    def from_name(cls, name: str, **kwargs: Any) -> Optional[Self]:
         if name not in name_to_config:
             # search through all `config['hf_config']['name']`
             try:
-                conf_dict = next(config for config in configs if name == config["hf_config"]["name"])
+                conf_dict = next(
+                    config for config in configs
+                    if name == config["hf_config"]["name"] or
+                    config["hf_config"]["org"] + "/" + config["hf_config"]["name"] == name
+                )
             except StopIteration:
                 raise ValueError(f"{name!r} is not a supported config name")
         else:
@@ -836,7 +840,7 @@ for c in llama_2:
         copy["name"] = c["name"].format(kind)
         copy["hf_config"]["name"] = c["hf_config"]["name"].format(kind)
         configs.append(copy)
-        
+
 
 ###############
 # Meta LLaMA 3
@@ -963,6 +967,33 @@ codegemma = [
     ),
 ]
 configs.extend(codegemma)
+
+################
+# H2Oai Danube2
+################
+danube2 = [
+    # https://huggingface.co/h2oai/h2o-danube2-1.8b-chat/blob/main/config.json
+    dict(
+        name="Danube2-1.8b-chat",
+        hf_config=dict(org="h2oai", name="h2o-danube2-1.8b-chat"),
+        vocab_size=32000,
+        n_layer=24,
+        n_head=32,
+        n_embd=2560,
+        block_size=4096,  # should be 8192 but sliding_window mechanism is not implemented
+        intermediate_size=6912,
+        padding_multiple=64,
+        norm_eps=1e-05,
+        rope_base=10000,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        mlp_class_name="LLaMAMLP",
+    )
+]
+configs.extend(danube2)
 
 
 ##########################
@@ -1499,6 +1530,42 @@ configs.append(
         intermediate_size=14336,
     )
 )
+configs.append(
+    # https://huggingface.co/mistralai/Mistral-7B-v0.3/blob/main/config.json
+    dict(
+        name="Mistral-7B-v0.3",
+        hf_config=dict(org="mistralai", name="Mistral-7B-v0.3"),
+        padded_vocab_size=32768,
+        block_size=32768,
+        n_layer=32,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        norm_eps=1e-05,
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=14336,
+    )
+)
+configs.append(
+    # https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3/blob/main/config.json
+    dict(
+        name="Mistral-7B-Instruct-v0.3",
+        hf_config=dict(org="mistralai", name="Mistral-7B-Instruct-v0.3"),
+        padded_vocab_size=32768,
+        block_size=32768,
+        n_layer=32,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        norm_eps=1e-05,
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=14336,
+    )
+)
 
 
 ############
@@ -1517,7 +1584,7 @@ tiny_llama = [
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
-        norm_class_name="RMSNorm",  # original TinyLlama uses FusedRMSNorm
+        norm_class_name="RMSNorm",  # original TinyLlama use FusedRMSNorm
         norm_eps=1e-5,
         mlp_class_name="LLaMAMLP",
         intermediate_size=5632,
@@ -1530,6 +1597,32 @@ for c in tiny_llama:
         copy["name"] = c["name"].format(kind)
         copy["hf_config"]["name"] = c["hf_config"]["name"].format(hf_postfix)
         configs.append(copy)
+
+
+############
+# MicroLlama
+############
+micro_llama = [
+    dict(
+        name="micro-llama-300M",
+        hf_config=dict(org="keeeeenw", name="MicroLlama"),
+        block_size=2048,
+        vocab_size=32000,
+        padding_multiple=64,
+        n_layer=12,
+        n_head=16,
+        n_embd=1024,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",  # original TinyLlama and MicroLlama use FusedRMSNorm
+        norm_eps=1e-5,
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=5632,
+        n_query_groups=4,
+    )
+]
+configs.extend(micro_llama)
 
 
 ##########################
