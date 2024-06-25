@@ -630,3 +630,15 @@ def extend_checkpoint_dir(checkpoint_dir: Path) -> Path:
         and new_checkpoint_dir.exists()
     )
     return new_checkpoint_dir if should_return_new_dir else checkpoint_dir
+
+
+def recreate_graph(edge_list_str: str):
+    # Split the string into lines
+    edge_list_lines = edge_list_str.strip().split("\n")
+
+    # Create a list of edge tuples
+    edges = [tuple(map(int, line.split())) for line in edge_list_lines]
+
+    # Create a new graph and add the edges
+    G_loaded = nx.Graph()
+    G_loaded.add_edges_from(edges)
