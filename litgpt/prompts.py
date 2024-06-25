@@ -170,7 +170,13 @@ class Llama2FunctionCalling(PromptStyle):
                 "Search the web for content on Bing. This allows users to search online/the internet/the web for"
                 " content."
             ),
-            "arguments": [{"name": "query", "type": "string", "description": "The search query string"}],
+            "arguments": [
+                {
+                    "name": "query",
+                    "type": "string",
+                    "description": "The search query string",
+                }
+            ],
         }
 
         system_prompt = (
@@ -222,8 +228,7 @@ class Llama3(PromptStyle):
                 "{system}<|eot_id|>\n"  # The system prompt is optional
             )
             user_template = (
-                "<|start_header_id|>user<|end_header_id|>\n\n"
-                "{user_msg}<|eot_id|>"
+                "<|start_header_id|>user<|end_header_id|>\n\n" "{user_msg}<|eot_id|>"
             )
             assistant_template = (
                 "<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -233,7 +238,9 @@ class Llama3(PromptStyle):
                 template = template.format(system=prompt[0]["content"])
                 prompt = prompt[1:]
             else:
-                template = template.format(system="You are a helpful assistant.")  # fall back to default
+                template = template.format(
+                    system="You are a helpful assistant."
+                )  # fall back to default
 
             for item in prompt:
                 role, content = item["role"], item["content"]
@@ -242,9 +249,13 @@ class Llama3(PromptStyle):
                 elif role == "user":
                     template += user_template.format(user_msg=content)
                 elif role == "system":
-                    raise ValueError("'system' role is only allowed at the beginning of the conversation list.")
+                    raise ValueError(
+                        "'system' role is only allowed at the beginning of the conversation list."
+                    )
                 else:
-                    raise ValueError(f"Unknown role: '{role}'. Supported roles are 'assistant' and 'user'")
+                    raise ValueError(
+                        f"Unknown role: '{role}'. Supported roles are 'assistant' and 'user'"
+                    )
             template += "<|start_header_id|>assistant<|end_header_id|>\n\n"
             return template
 
@@ -325,6 +336,11 @@ class Gemma(PromptStyle):
         return f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
 
 
+class AMR2Text(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<AMR>: {prompt}\n<text>:"
+
+
 class H2Oai(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"<|prompt|>{prompt}</s><|answer|>"
@@ -354,6 +370,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "phi-2": Phi2,
     "tinyllama": TinyLlama,
     "gemma": Gemma,
+    "amr2text": AMR2Text,
     "h2oai": H2Oai,
     "llama3": Llama3,
 }
@@ -396,6 +413,8 @@ def model_name_to_prompt_style(model_name: str) -> PromptStyle:
         return TinyLlama()
     if re.search(r"(Code)?Gemma.*-it", model_name):
         return Gemma()
+    if re.search(r"AMR2Text", model_name):
+        return AMR2Text()
     if re.search("Danube2.*-chat", model_name):
         return H2Oai()
     return Default()
