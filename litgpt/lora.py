@@ -581,26 +581,28 @@ class GPT(BaseModel):
         # Process eigenvectors through the MLP to get positional encodings
         pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
 
+
         if input_pos is not None:  # use the kv cache
+            cos = self.cos.index_select(0, input_pos)
+            sin = self.sin.index_select(0, input_pos)
             if self.mask_cache is None:
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
             mask = self.mask_cache.index_select(2, input_pos)
         else:
+            cos = self.cos[:T]
+            sin = self.sin[:T]
             mask = None
-
-        x = self.transformer.wte(idx)  
-        x[:, :pos_encodings.shape[1], :] += pos_encodings
-
+            
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
-            x = block(x, mask, pos_encodings, input_pos)
+            x = block(x, cos, sin, mask, input_pos)
         x = self.transformer.ln_f(x)
         if lm_head_chunk_size > 0:
             # chunk the lm head logits to reduce the peak memory used by autograd
             return [self.lm_head(x_i) for x_i in x.split(lm_head_chunk_size, dim=1)]
-        x = self.lm_head(x) 
-        return x  # (B, T, vocab_size)
+        return self.lm_head(x)  # (B, T, vocab_size)
 
     @classmethod
     def from_name(cls, name: str, **kwargs: Any) -> Self:
