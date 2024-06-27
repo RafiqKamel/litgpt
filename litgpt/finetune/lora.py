@@ -211,7 +211,7 @@ def main(
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
     with fabric.init_module(empty_init=(devices > 1)):
-        model = GPT(config)
+        model = GPT(config, eig_vec_size=train.max_seq_length*2)
     mark_only_lora_as_trainable(model)
 
     fabric.print(
@@ -442,8 +442,8 @@ def validate(
     for k, batch in enumerate(val_dataloader):
         if k >= eval.max_iters:
             break
-        input_ids, targets = batch["input_ids"], batch["labels"]
-        logits = model(input_ids)
+        input_ids, targets, eig_vec = batch["input_ids"], batch["labels"], batch["eig_vec"]
+        logits = model(input_ids, eig_vec)
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )

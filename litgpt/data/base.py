@@ -105,11 +105,11 @@ class SFTDataset(Dataset):
             eig_vec = example["eig_vec"]
         else:
             eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
-            self.data[idx]["eig_vec"] = eig_vec
+            self.data[idx]["eig_vec"] = eig_vec     
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
-            "eig_vec": eig_vec,
+            "eig_vec": torch.from_numpy(eig_vec)
         }
 
 
@@ -138,7 +138,7 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels"):
+    for key in ("input_ids", "labels", "eig_vec"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
         # Pad right based on the longest sequence

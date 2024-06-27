@@ -55,6 +55,7 @@ from typing_extensions import Self
 import litgpt
 from litgpt.config import Config as BaseConfig
 from litgpt.model import GPT as BaseModel
+from litgpt.model import PositionalEncodingMLP
 from litgpt.model import Block as BaseBlock
 from litgpt.model import CausalSelfAttention as BaseCausalSelfAttention
 from litgpt.model import KVCache
@@ -540,7 +541,7 @@ class Config(BaseConfig):
 
 
 class GPT(BaseModel):
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, eig_vec_size) -> None:
         nn.Module.__init__(self)
         assert config.padded_vocab_size is not None
         self.config = config
@@ -562,6 +563,7 @@ class GPT(BaseModel):
         )
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
+        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=eig_vec_size,output_dim=config.n_embd)
 
     def forward(
         self,
@@ -578,6 +580,7 @@ class GPT(BaseModel):
 
         # Process eigenvectors through the MLP to get positional encodings
         pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
+
         if input_pos is not None:  # use the kv cache
             if self.mask_cache is None:
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
@@ -585,7 +588,9 @@ class GPT(BaseModel):
         else:
             mask = None
 
-        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        x = self.transformer.wte(idx)  
+        x[:, :pos_encodings.shape[1], :] += pos_encodings
+
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
@@ -594,7 +599,8 @@ class GPT(BaseModel):
         if lm_head_chunk_size > 0:
             # chunk the lm head logits to reduce the peak memory used by autograd
             return [self.lm_head(x_i) for x_i in x.split(lm_head_chunk_size, dim=1)]
-        return self.lm_head(x)  # (B, T, vocab_size)
+        x = self.lm_head(x) 
+        return x  # (B, T, vocab_size)
 
     @classmethod
     def from_name(cls, name: str, **kwargs: Any) -> Self:

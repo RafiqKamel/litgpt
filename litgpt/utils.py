@@ -642,3 +642,4 @@ def recreate_graph(edge_list_str: str):
     # Create a new graph and add the edges
     G_loaded = nx.Graph()
     G_loaded.add_edges_from(edges)
+    return G_loaded

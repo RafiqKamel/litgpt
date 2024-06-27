@@ -17,7 +17,7 @@ from litgpt.config import Config
 
 
 class GPT(nn.Module):
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, eig_vec_size) -> None:
         super().__init__()
         assert config.padded_vocab_size is not None
         self.config = config
@@ -32,8 +32,11 @@ class GPT(nn.Module):
                 ln_f=config.norm_class(config.n_embd, eps=config.norm_eps),
             )
         )
+        self.eig_vec_size = eig_vec_size
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
+        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=eig_vec_size,output_dim=config.n_embd)
+        print(config.n_embd, "embedding length")
 
     @property
     def max_seq_length(self) -> int:
@@ -258,10 +261,10 @@ class CausalSelfAttention(nn.Module):
         k = k.reshape(B, -1, T, self.config.head_size)  # (B, nh_k, T, hs)
         v = v.reshape(B, -1, T, self.config.head_size)  # (B, nh_v, T, hs)
 
-        q_roped = apply_pos_emb(q, pos_emb=positinal_emb)
-        k_roped = apply_pos_emb(k, pos_emb=positinal_emb)
-        q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
-        k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
+        # q_roped = apply_pos_emb(q, pos_emb=positinal_emb)
+        # k_roped = apply_pos_emb(k, pos_emb=positinal_emb)
+        # q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
+        # k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
 
         if input_pos is not None:
             if not isinstance(self.kv_cache, KVCache):
@@ -416,6 +419,7 @@ def build_rope_cache(
 
 
 def apply_pos_emb(x: torch.Tensor, pos_emb: torch.Tensor) -> torch.Tensor:
+    print(x.shape)
     return x + pos_emb
 
 
@@ -494,6 +498,8 @@ class RMSNorm(torch.nn.Module):
 class PositionalEncodingMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
+        print(input_dim)
+        print(output_dim)
         self.fc1 = nn.Linear(input_dim, output_dim)
         self.act = nn.GELU()
         self.fc2 = nn.Linear(output_dim, output_dim)
