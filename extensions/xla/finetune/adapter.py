@@ -233,7 +233,7 @@ def validate(
     val_loss = losses.mean()
 
     # produce an example:
-    instruction = "Recommend a movie for me to watch during the weekend and explain the reason."
+    instruction = "and :op1 pass :ARG1 1000 :ARG0 toll :mod die :mod natural-disaster :name name :op1 Katrina :time date-entity :weekday wednesday :op2 include :ARG1 person :quant many :ARG0-of flee :time then :mod that :ARG2 person :ARG1-of obligate :ARG2 evacuate :ARG2 person :mod again :mod that"
     rank_print(fabric, instruction)
     sample = {"instruction": instruction, "input": ""}
     prompt = generate_prompt(sample)
