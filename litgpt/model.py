@@ -77,14 +77,13 @@ class GPT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(
-        self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None
+        self, idx: torch.Tensor,eig_vecs: Optional[torch.Tensor], input_pos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         T = idx.size(1)
         if self.max_seq_length < T:
             raise ValueError(
                 f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
             )
-
         if input_pos is not None:  # use the kv cache
             cos = self.cos.index_select(0, input_pos)
             sin = self.sin.index_select(0, input_pos)
@@ -94,16 +93,22 @@ class GPT(nn.Module):
         else:
             cos = self.cos[:T]
             sin = self.sin[:T]
-            mask = None
-
-        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+            mask = None   
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
+        # Process eigenvectors through the MLP to get positional encodings
+        if eig_vecs is not None:
+            eig_vecs = eig_vecs.to(self.device)
+            pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
+        else:
+            print("eigen vectors passed is None")
+            pos_encodings = torch.zeros_like(x)    
+        x[:, :pos_encodings.shape[1], :] += pos_encodings
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
-
         for block in self.transformer.h:
             x = block(x, cos, sin, mask, input_pos)
         x = self.transformer.ln_f(x)
-        return self.lm_head(x)  # (b, t, vocab_size)
+        return self.lm_head(x)  # (B, T, vocab_size)
 
     @classmethod
     def from_name(cls, name: str, **kwargs: Any) -> Self:
