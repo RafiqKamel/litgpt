@@ -25,7 +25,7 @@ class Alpaca(DataModule):
     """Whether to mask the prompt section from the label (with ``ignore_index``)."""
     val_split_fraction: float = 0.03865  # to get exactly 2000 validation samples,
     """The fraction of the dataset to use for the validation dataset. The rest is used for training."""
-    prompt_style: Union[str, PromptStyle] = "alpaca"
+    prompt_style: Union[str, PromptStyle] = "amr2text"
     """The style to apply to instruction prompts. See `litgpt.prompts` for a list of available styles."""
     ignore_index: int = -100
     """The index to use for elements to be ignored in the label."""
@@ -51,7 +51,7 @@ class Alpaca(DataModule):
             self.prompt_style = PromptStyle.from_name(self.prompt_style)
 
     def connect(
-        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None
+        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 16, max_seq_length: Optional[int] = None
     ) -> None:
         self.tokenizer = tokenizer
         self.batch_size = batch_size
