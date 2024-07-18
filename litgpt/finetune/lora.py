@@ -16,6 +16,7 @@ from lightning.fabric.utilities import ThroughputMonitor
 from lightning_utilities.core.imports import RequirementCache
 from torch.utils.data import DataLoader, ConcatDataset
 from torchmetrics import RunningMean
+import numpy as np
 
 from litgpt.args import EvalArgs, TrainArgs
 from litgpt.data import Alpaca, DataModule
@@ -23,6 +24,8 @@ from litgpt.generate.base import generate
 from litgpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable
 from litgpt.prompts import save_prompt_style
 from litgpt.scripts.merge_lora import merge_lora
+from litgpt.utils import recreate_graph
+from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.tokenizer import Tokenizer
 from litgpt.utils import (
     CycleIterator,
@@ -278,7 +281,11 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
+        torch.save(model.positional_encoding_mlp.state_dict(), save_path.parent / "pos_encoding_weights.pth")
         merge_lora(checkpoint_dir=save_path.parent)
+        # save weight for postional encoding layer
+        # Save the weights for the positional encoding layer
+        
 
 
 def fit(
@@ -458,9 +465,13 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction = "and :op1 pass :ARG1 1000 :ARG0 toll :mod die :mod natural-disaster :name name :op1 Katrina :time date-entity :weekday wednesday :op2 include :ARG1 person :quant many :ARG0-of flee :time then :mod that :ARG2 person :ARG1-of obligate :ARG2 evacuate :ARG2 person :mod again :mod that"
+    instruction =  "and :op1 mend :ARG1 fence :quant some :op2 get :ARG1 move :ARG1 country :mod this",
+    graph_text =  "0 1\n0 8\n1 2\n8 9\n2 3\n3 4\n4 5\n5 6\n6 7\n9 10\n10 11\n11 12\n12 13\n13 14\n14 15"
+    graph = recreate_graph(graph_text)
     fabric.print(instruction)
     prompt = data.prompt_style.apply(instruction)
+    eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size//2)
+    eig_vec = torch.from_numpy(np.array([eig_vec]))
     encoded = tokenizer.encode(prompt, device=fabric.device)
     model.eval()
 
@@ -468,11 +479,12 @@ def generate_example(
         # do not set `max_seq_length=max_returned_token` because memory is not a concern here
         model.set_kv_cache(batch_size=1)
     output = generate(
-        model,
-        encoded,
+        model=model,
+        prompt=encoded,
         max_returned_tokens=len(encoded) + eval.max_new_tokens,
         temperature=0.8,
         eos_id=tokenizer.eos_id,
+        eig_vec = eig_vec
     )
     model.clear_kv_cache()
     model.train()
