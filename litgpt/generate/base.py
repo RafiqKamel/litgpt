@@ -13,6 +13,7 @@ import torch._dynamo.config
 import torch._inductor.config
 from lightning.fabric.plugins import BitsandbytesPrecision
 from lightning_utilities.core.imports import RequirementCache
+import numpy as np
 
 from litgpt.model import GPT
 from litgpt.config import Config
@@ -72,8 +73,8 @@ def sample(
     return torch.argmax(logits, dim=-1, keepdim=True)
 
 
-def next_token(model: GPT, input_pos: torch.Tensor, x: torch.Tensor, **kwargs: Any) -> torch.Tensor:
-    logits = model(x, input_pos)
+def next_token(model: GPT, eig_vec: torch.Tensor,input_pos: torch.Tensor, x: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    logits = model(idx=x, input_pos=input_pos, eig_vecs=eig_vec)
     next = sample(logits, **kwargs)
     return next.to(dtype=x.dtype)
 
@@ -83,6 +84,7 @@ def generate(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
+    eig_vec: torch.Tensor,
     *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
@@ -132,12 +134,13 @@ def generate(
         tokens = []
     input_pos = torch.tensor([T], device=device)
     token = next_token(
-        model, torch.arange(0, T, device=device), prompt.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p
+        model=model, input_pos=torch.arange(0, T, device=device), x=prompt.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p, eig_vec=eig_vec
     ).clone()
     tokens.append(token)
     for _ in range(2, max_returned_tokens - T + 1):
+        print(token.shape)
         token = next_token(
-            model, input_pos, token.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p
+            model=model, input_pos=input_pos, x=token.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p, eig_vec=None
         ).clone()
         tokens.append(token)
         if token == eos_id:
