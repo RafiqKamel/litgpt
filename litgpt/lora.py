@@ -490,7 +490,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
     """
     # freeze all layers except LoRA's
     for n, p in model.named_parameters():
-        if "lora_" not in n:
+        if "lora_" not in n and "positional" not in n:
             p.requires_grad = False
 
     # depending on the `bias` value unfreeze bias weights
@@ -545,6 +545,7 @@ class GPT(BaseModel):
         nn.Module.__init__(self)
         assert config.padded_vocab_size is not None
         self.config = config
+        self.eig_vec_size = eig_vec_size
 
         self.lm_head = LoRALinear(
             config.n_embd,
@@ -564,6 +565,7 @@ class GPT(BaseModel):
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
         self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=eig_vec_size,output_dim=config.n_embd)
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def forward(
         self,
@@ -578,8 +580,7 @@ class GPT(BaseModel):
                 f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
             )
 
-        # Process eigenvectors through the MLP to get positional encodings
-        pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
+
 
 
         if input_pos is not None:  # use the kv cache
@@ -593,7 +594,15 @@ class GPT(BaseModel):
             sin = self.sin[:T]
             mask = None
             
-        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
+        # Process eigenvectors through the MLP to get positional encodings
+        if eig_vecs is not None:
+            eig_vecs = eig_vecs.to(self.device)
+            pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
+        else:
+            print("eigen vectors passed is None")
+            pos_encodings = torch.zeros_like(x)    
+        x[:, :pos_encodings.shape[1], :] += pos_encodings
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
