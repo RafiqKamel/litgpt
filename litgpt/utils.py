@@ -36,6 +36,7 @@ from lightning.pytorch.cli import instantiate_class
 from torch.serialization import normalize_storage_type
 from typing_extensions import Self
 import networkx as nx
+import yaml
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -394,12 +395,16 @@ def get_default_supported_precision(training: bool) -> str:
 
 
 def load_checkpoint(
-    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True
+    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True, load_pos_encoding_weights: bool = False,
 ) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
         state_dict = lazy_load(checkpoint_path)
+        if load_pos_encoding_weights:
+            state_dict_positional = lazy_load(checkpoint_path.parent/"pos_encoding_weights.pth")
+            state_dict_positional = add_prefix_to_dict_keys(state_dict_positional, "positional_encoding_mlp.")
+            state_dict.update(state_dict_positional)
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
 
@@ -643,3 +648,36 @@ def recreate_graph(edge_list_str: str):
     G_loaded = nx.Graph()
     G_loaded.add_edges_from(edges)
     return G_loaded
+
+
+def load_properties_from_yaml(file_path):
+    """
+    Load properties from a YAML file.
+
+    Args:
+        file_path (str): The path to the YAML file.
+
+    Returns:
+        dict: A dictionary containing the properties from the YAML file.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            properties = yaml.safe_load(file)
+            return properties
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} does not exist.")
+        return None
+    except yaml.YAMLError as e:
+        print(f"Error: The file {file_path} is not a valid YAML file. {e}")
+        return None
+def add_prefix_to_dict_keys(dict, prefix):
+    """
+    Add a prefix to all keys in a dictionary.
+
+    Args:
+        dict (dict): The dictionary to which to add the prefix.
+
+    Returns:
+        dict: The dictionary with the prefix added to all keys.
+    """
+    return {f"{prefix}{key}": value for key, value in dict.items()}
