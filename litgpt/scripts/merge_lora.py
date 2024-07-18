@@ -10,7 +10,7 @@ import torch
 import yaml
 
 from litgpt.lora import GPT, Config, lora_filter, merge_lora_weights
-from litgpt.utils import check_valid_checkpoint_dir, extend_checkpoint_dir
+from litgpt.utils import check_valid_checkpoint_dir, extend_checkpoint_dir, load_properties_from_yaml, add_prefix_to_dict_keys
 
 
 def merge_lora(
@@ -56,9 +56,11 @@ def merge_lora(
 
     fabric = L.Fabric(devices=1, precision=precision, accelerator="cpu")
     config = Config.from_file(checkpoint_dir / "model_config.yaml", **lora_params)
+    hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
+    eig_vec_size = hp_config["train"]["max_seq_length"] * 2
 
     with fabric.init_module(), torch.device("meta"):
-        model = GPT(config)
+        model = GPT(config, eig_vec_size=eig_vec_size)
         # we don't care about these to perform merging
         model.cos = None
         model.sin = None
@@ -67,9 +69,13 @@ def merge_lora(
     pretrained_checkpoint = torch.load(str(pretrained_checkpoint_dir / "lit_model.pth"), mmap=True)
     lora_checkpoint = torch.load(str(lora_path), mmap=True)
     lora_checkpoint = lora_checkpoint.get("model", lora_checkpoint)
+    positional_encoding_weights = torch.load(str(checkpoint_dir / "pos_encoding_weights.pth"), mmap=True)
+    positional_encoding_weights = add_prefix_to_dict_keys(positional_encoding_weights, "positional_encoding_mlp.")
+    
 
     # Merge LoRA weights into the base model
     pretrained_checkpoint.update(lora_checkpoint)
+    pretrained_checkpoint.update(positional_encoding_weights)
     model.load_state_dict(pretrained_checkpoint, assign=True)
     # since LoRA finetuning only saves the LoRA weights, we treat the lora weights dtype as the expected dtype
     lora_dtype = next(iter(lora_checkpoint.values())).dtype
