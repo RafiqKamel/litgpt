@@ -18,7 +18,8 @@ from litgpt.utils import (
     check_valid_checkpoint_dir,
     extend_checkpoint_dir,
     get_default_supported_precision,
-    load_checkpoint
+    load_checkpoint,
+    load_properties_from_yaml
 )
 
 
@@ -72,7 +73,7 @@ def generate(
     tokens = []
     token = prompt
     for t in range(1, max_returned_tokens - T + 1):
-        token = next_token(model, input_pos, token.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p)
+        token = next_token(model=model, input_pos=input_pos, x=token.view(1, -1), temperature=temperature, top_k=top_k, top_p=top_p, eig_vec=None)
         tokens.append(token)
         # check the stop condition
         if any((l := len(st)) <= len(tokens) and all(a == b for a, b in zip(tokens[-l:], st)) for st in stop_tokens):
@@ -226,12 +227,14 @@ def main(
 
     check_valid_checkpoint_dir(checkpoint_dir)
     config = Config.from_file(checkpoint_dir / "model_config.yaml")
+    hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
+    eig_vec_size = hp_config["train"]["max_seq_length"] * 2
 
     with fabric.init_module(empty_init=True):
-        model = GPT(config)
+        model = GPT(config, eig_vec_size=eig_vec_size)
         # enable the kv cache
         model.set_kv_cache(batch_size=1)
-    load_checkpoint(fabric, model, checkpoint_path)
+    load_checkpoint(fabric, model, checkpoint_path, load_pos_encoding_weights=True)
     model.eval()
 
     if compile:
