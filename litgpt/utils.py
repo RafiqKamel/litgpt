@@ -37,6 +37,7 @@ from torch.serialization import normalize_storage_type
 from typing_extensions import Self
 import networkx as nx
 import yaml
+import numpy as np
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -407,6 +408,7 @@ def load_checkpoint(
             state_dict.update(state_dict_positional)
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
+        model.float()
 
 
 def flops_per_param(
@@ -681,3 +683,30 @@ def add_prefix_to_dict_keys(dict, prefix):
         dict: The dictionary with the prefix added to all keys.
     """
     return {f"{prefix}{key}": value for key, value in dict.items()}
+
+def resize_model_vocabulary_size(model, number_of_new_tokens):
+    """
+    Resize the vocabulary size of a model.
+
+    Args:
+        model (nn.Module): The model to resize.
+        new_vocabulary_size (int): The new vocabulary size.
+    """
+    new_vocabulary_size = model.config.padded_vocab_size + number_of_new_tokens
+    old_vocab_size = model.config.padded_vocab_size
+    embedding_dim = model.config.n_embd
+    old_embeddings = model.get_embeddings()
+    old_embeddings = torch.tensor(old_embeddings, dtype=torch.float32)
+
+    # Assuming `old_vocab_size` and `embedding_dim` are defined as in previous examples
+    new_embeddings = torch.zeros((new_vocabulary_size, embedding_dim))
+    new_embeddings[:old_vocab_size, :] = old_embeddings
+
+    # Initialize the new part of the embedding matrix with Xavier initialization
+    new_embeddings[old_vocab_size:, :] = xavier_initialization((new_vocabulary_size - old_vocab_size, embedding_dim))
+    
+    # Set the new embedding matrix back to the model
+    model.set_embeddings(new_embeddings)
+
+def xavier_initialization(shape):
+    return torch.tensor(np.random.randn(*shape) * np.sqrt(2 / (shape[0] + shape[1])))
