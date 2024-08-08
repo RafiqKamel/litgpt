@@ -338,7 +338,7 @@ class Gemma(PromptStyle):
 
 class AMR2Text(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
-        return f"<AMR>: {prompt}\n<text>:"
+        return f"<AMR> {prompt} <text>"
 
 
 class H2Oai(PromptStyle):
