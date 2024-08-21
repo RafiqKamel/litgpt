@@ -697,7 +697,6 @@ def resize_model_vocabulary_size(model, number_of_new_tokens):
     old_vocab_size = model.config.padded_vocab_size
     embedding_dim = model.config.n_embd
     old_embeddings = model.get_embeddings()
-    old_embeddings = torch.tensor(old_embeddings, dtype=torch.float32)
 
     # Assuming `old_vocab_size` and `embedding_dim` are defined as in previous examples
     new_embeddings = torch.zeros((new_vocabulary_size, embedding_dim))
@@ -708,6 +707,7 @@ def resize_model_vocabulary_size(model, number_of_new_tokens):
     
     # Set the new embedding matrix back to the model
     model.set_embeddings(new_embeddings)
+    model.lm_head.resize_output(new_vocabulary_size)
 
 def xavier_initialization(shape):
     return torch.tensor(np.random.randn(*shape) * np.sqrt(2 / (shape[0] + shape[1])))
