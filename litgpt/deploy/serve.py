@@ -18,8 +18,12 @@ from litgpt.prompts import load_prompt_style, has_prompt_style, PromptStyle
 from litgpt.utils import (
     extend_checkpoint_dir,
     get_default_supported_precision,
-    load_checkpoint
+    load_checkpoint,
+    load_properties_from_yaml
 )
+from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
+from litgpt.utils import recreate_graph
+
 
 
 _LITSERVE_AVAILABLE = RequirementCache("litserve")
@@ -63,6 +67,8 @@ class BaseLitAPI(LitAPI):
             precision=precision,
         )
         checkpoint_path = self.checkpoint_dir / "lit_model.pth"
+        hp_config = load_properties_from_yaml(self.checkpoint_dir  / "hyperparameters.yaml")
+        eig_vec_size = hp_config["train"]["max_seq_length"] * 2
         self.tokenizer = Tokenizer(self.checkpoint_dir)
         self.prompt_style = (
             load_prompt_style(self.checkpoint_dir)
@@ -70,7 +76,7 @@ class BaseLitAPI(LitAPI):
             else PromptStyle.from_config(config)
         )
         with fabric.init_module(empty_init=True):
-            model = GPT(config)
+            model = GPT(config, eig_vec_size=eig_vec_size)
         with fabric.init_tensor():
             # enable the kv cache
             model.set_kv_cache(batch_size=1)
@@ -83,9 +89,10 @@ class BaseLitAPI(LitAPI):
     def decode_request(self, request: Dict[str, Any]) -> Any:
         # Convert the request payload to your model input.
         prompt = str(request["prompt"])
+        edge_list = str(request["edge_list"])
         prompt = self.prompt_style.apply(prompt)
         encoded = self.tokenizer.encode(prompt, device=self.device)
-        return encoded
+        return encoded, edge_list
 
 
 class SimpleLitAPI(BaseLitAPI):
@@ -96,25 +103,32 @@ class SimpleLitAPI(BaseLitAPI):
                  top_k: int = 50,
                  top_p: float = 1.0,
                  max_new_tokens: int = 50):
-        super().__init__(checkpoint_dir, precision, temperature, top_k, top_p, max_new_tokens)   
+        super().__init__(checkpoint_dir, precision, temperature, top_k, top_p, max_new_tokens) 
+        hp_config = load_properties_from_yaml(checkpoint_dir  / "hyperparameters.yaml")
+        self.max_seq_length = hp_config["train"]["max_seq_length"]
 
     def setup(self, device: str):
         super().setup(device)
 
     def predict(self, inputs: torch.Tensor) -> Any:
         # Run the model on the input and return the output.
-        prompt_length = inputs.size(0)
+        prompt = inputs[0]
+        prompt_length = prompt.size(0)
+        edge_list = inputs[1]
+        graph = recreate_graph(edge_list)
+        eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
+        eig_vec = torch.from_numpy(eig_vec)
         max_returned_tokens = prompt_length + self.max_new_tokens
-
         y = plain_generate(
             self.model,
-            inputs,
+            prompt,
             max_returned_tokens,
             temperature=self.temperature,
             top_k=self.top_k,
             top_p=self.top_p,
             eos_id=self.tokenizer.eos_id,
-            include_prompt=False
+            include_prompt=False,
+            eig_vec=eig_vec
         )
 
         for block in self.model.transformer.h:
@@ -224,6 +238,7 @@ def run_server(
                 max_new_tokens=max_new_tokens,
                 ),
             accelerator=accelerator,
+            timeout=300,
             devices=devices
             )
 
@@ -239,6 +254,7 @@ def run_server(
                 ),
             accelerator=accelerator,
             devices=devices,
+            timeout=300,
             stream=True
             )
 
