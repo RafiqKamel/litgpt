@@ -1,9 +1,9 @@
 import numpy as np
 import networkx as nx
+from litgpt.positional_encodings_config import magentic_laplace_encodings_q
 
-
-def magnetic_laplacian(g, tolerance, q):
-    def exp_theta_i(A, q=0.25):
+def magnetic_laplacian(g, tolerance, q=magentic_laplace_encodings_q):
+    def exp_theta_i(A, q):
         return np.exp(2 * np.pi * q * 1j * (A - A.T))
 
     A_symmetric = nx.adjacency_matrix(g.to_undirected()).toarray()
