@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import Optional, Union
+from litgpt.special_tokens import new_tokens_amr
 
 import torch
 
@@ -16,21 +17,12 @@ class Tokenizer:
         self.use_bos = self.check_if_bos_token_used(checkpoint_dir)
         self.bos_id = None
         self.eos_id = None
-
-        # some checkpoints have both files, `.model` takes precedence
-        if (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
-            from sentencepiece import SentencePieceProcessor
-
-            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))
-            self.backend = "sentencepiece"
-            self.bos_id = self.processor.bos_id()
-            self.eos_id = self.processor.eos_id()
-
-        elif (vocabulary_path := checkpoint_dir / "tokenizer.json").is_file():
+        if (vocabulary_path := checkpoint_dir / "tokenizer.json").is_file():
             from tokenizers import Tokenizer as HFTokenizer
 
             self.processor = HFTokenizer.from_file(str(vocabulary_path))
             self.backend = "huggingface"
+            self.processor.add_tokens(new_tokens_amr)
 
             if (special_tokens_path := checkpoint_dir / "tokenizer_config.json").is_file():
                 with open(special_tokens_path, encoding="utf-8") as fp:
@@ -46,6 +38,16 @@ class Tokenizer:
                     self.bos_id = config.get("bos_token_id")
                 if self.eos_id is None:
                     self.eos_id = config.get("eos_token_id")
+        # some checkpoints have both files, `.model` takes precedence
+        elif (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
+            from sentencepiece import SentencePieceProcessor
+
+            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))
+            self.backend = "sentencepiece"
+            self.bos_id = self.processor.bos_id()
+            self.eos_id = self.processor.eos_id()
+
+
         else:
             raise NotImplementedError
 
