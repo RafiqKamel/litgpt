@@ -13,6 +13,7 @@ from litgpt import Tokenizer
 from litgpt.prompts import PromptStyle
 from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.utils import recreate_graph
+from litgpt.utils import process_eigenvectors_subtokens
 
 
 class DataModule(LightningDataModule):
@@ -106,7 +107,9 @@ class SFTDataset(Dataset):
             eig_vec = example["eig_vec"]
         else:
             eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
+            eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
             self.data[idx]["eig_vec"] = eig_vec     
+
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
