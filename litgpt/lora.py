@@ -183,6 +183,53 @@ class LoRALinear(LoRALayer):
             @ self.lora_B.transpose(0, 1)
         ) * self.scaling
         return pretrained + lora
+    def resize_output(self, new_out_features: int):
+        """
+        Resizes the output features of the linear layer and adjusts the LoRA matrices accordingly.
+
+        Args:
+            new_out_features (int): The new number of output features.
+        """
+        # Resize the pretrained weight matrix
+        current_weight = self.linear.weight.data
+        new_weight = torch.empty((new_out_features, current_weight.size(1)), dtype=current_weight.dtype, device=current_weight.device)
+        if new_out_features > current_weight.size(0):
+            new_weight[:current_weight.size(0)] = current_weight
+            nn.init.kaiming_uniform_(new_weight[current_weight.size(0):], a=math.sqrt(5))
+        else:
+            new_weight = current_weight[:new_out_features]
+        self.linear.weight = nn.Parameter(new_weight)
+
+        # Resize the bias if exists
+        if self.linear.bias is not None:
+            current_bias = self.linear.bias.data
+            new_bias = torch.empty(new_out_features, dtype=current_bias.dtype, device=current_bias.device)
+            if new_out_features > current_bias.size(0):
+                new_bias[:current_bias.size(0)] = current_bias
+                fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.linear.weight)
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                nn.init.uniform_(new_bias[current_bias.size(0):], -bound, bound)
+            else:
+                new_bias = current_bias[:new_out_features]
+            self.linear.bias = nn.Parameter(new_bias)
+
+        # Resize LoRA B matrix if LoRA is being used
+        if self.r > 0:
+            current_lora_B = self.lora_B.data
+            new_lora_B = torch.empty((new_out_features, self.r), dtype=current_lora_B.dtype, device=current_lora_B.device)
+            if new_out_features > current_lora_B.size(0):
+                new_lora_B[:current_lora_B.size(0)] = current_lora_B
+                nn.init.zeros_(new_lora_B[current_lora_B.size(0):])
+            else:
+                new_lora_B = current_lora_B[:new_out_features]
+            self.lora_B = nn.Parameter(new_lora_B)
+
+        # Update the out_features attribute
+        self.linear.out_features = new_out_features
+
+        # Reset merged flag since weights need to be recomputed
+        self.merged = False
+
 
 
 class LoRAQKVLinear(LoRALinear):
@@ -590,7 +637,7 @@ class GPT(BaseModel):
         else:
             cos = self.cos[:T]
             sin = self.sin[:T]
-            mask = None
+            mask = None  
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
         # Process eigenvectors through the MLP to get positional encodings
         if eig_vecs is not None:
