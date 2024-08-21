@@ -740,8 +740,6 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
     tokens = sentence.split()
     ids = tokenizer.encode(sentence)
     subtokens = [tokenizer.decode(id) for id in ids]
-    print(subtokens, len(subtokens))
-    print(tokens, len(tokens))
     
     index_map = {}
     subtoken_index = 0
