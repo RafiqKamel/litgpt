@@ -27,6 +27,7 @@ from litgpt.scripts.merge_lora import merge_lora
 from litgpt.utils import recreate_graph
 from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.tokenizer import Tokenizer
+from litgpt.special_tokens import new_tokens_amr
 from litgpt.utils import (
     CycleIterator,
     check_valid_checkpoint_dir,
@@ -42,6 +43,7 @@ from litgpt.utils import (
     num_parameters,
     parse_devices,
     save_hyperparameters,
+    resize_model_vocabulary_size
 )
 
 
@@ -238,6 +240,9 @@ def main(
 
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
+    
+    resize_model_vocabulary_size(model, len(new_tokens_amr))
+    
 
     train_time = time.perf_counter()
     fit(
