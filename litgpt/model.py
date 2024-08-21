@@ -14,6 +14,7 @@ import torch.nn as nn
 from typing_extensions import Self
 
 from litgpt.config import Config
+from litgpt.positional_encodings_config import sinousidial_encodings_dim
 
 
 class GPT(nn.Module):
@@ -35,7 +36,9 @@ class GPT(nn.Module):
         self.eig_vec_size = eig_vec_size
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
-        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=eig_vec_size,output_dim=config.n_embd)
+        input_dim = eig_vec_size + sinousidial_encodings_dim
+        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=input_dim,output_dim=config.n_embd)
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     @property
     def max_seq_length(self) -> int:
@@ -101,7 +104,7 @@ class GPT(nn.Module):
             pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros_like(x)    
+            pos_encodings = torch.zeros_like(x)       
         x[:, :pos_encodings.shape[1], :] += pos_encodings
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
@@ -109,7 +112,14 @@ class GPT(nn.Module):
             x = block(x, cos, sin, mask, input_pos)
         x = self.transformer.ln_f(x)
         return self.lm_head(x)  # (B, T, vocab_size)
+   
+    def get_embeddings(self) -> nn.Embedding:
+        return self.transformer.wte.weight
+    
+    def set_embeddings(self, embeddings_weights) -> None:
+        self.transformer.wte.weight.data = embeddings_weights
 
+    
     @classmethod
     def from_name(cls, name: str, **kwargs: Any) -> Self:
         return cls(Config.from_name(name, **kwargs))
