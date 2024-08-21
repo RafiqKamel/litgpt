@@ -760,11 +760,8 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
     return index_map
 
 def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
-    print(sentence)
     indexing_map = create_indexing_map(sentence, tokenizer)
     subtoken_eigvecs = []
-    print(indexing_map)
-    print(eigvecs.shape)
     for i, eigvec in enumerate(eigvecs):
         subtoken_indices = indexing_map[i]
         subtoken_eigvecs.extend([eigvec] * len(subtoken_indices))
