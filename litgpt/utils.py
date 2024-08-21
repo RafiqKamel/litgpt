@@ -38,6 +38,7 @@ from typing_extensions import Self
 import networkx as nx
 import yaml
 import numpy as np
+from litgpt.positional_encodings_config import sinousidial_encodings_q, sinousidial_encodings_dim
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -710,3 +711,66 @@ def resize_model_vocabulary_size(model, number_of_new_tokens):
 
 def xavier_initialization(shape):
     return torch.tensor(np.random.randn(*shape) * np.sqrt(2 / (shape[0] + shape[1])))
+
+
+
+def positional_encoding(index, d_model=sinousidial_encodings_dim, q=sinousidial_encodings_q):
+    """
+    Generate the sinusoidal positional encoding for a specific position in a sequence.
+
+    Parameters:
+    - index (int): The position in the sequence for which the encoding is being generated.
+    - d_model (int): The dimensionality of the model.
+    - q (float): The base of the exponent used in the positional encoding formula (default is 10000).
+
+    Returns:
+    - np.ndarray: The positional encoding for the given index.
+    """
+    encoding = np.zeros(d_model)
+    
+    for i in range(0, d_model, 2):
+        angle = index / np.power(q, (2 * (i // 2)) / d_model)
+        encoding[i] = np.sin(angle)
+        if i + 1 < d_model:
+            encoding[i + 1] = np.cos(angle)
+    
+    return encoding
+
+def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
+    tokens = sentence.split()
+    ids = tokenizer.encode(sentence)
+    subtokens = [tokenizer.decode(id) for id in ids]
+    print(subtokens, len(subtokens))
+    print(tokens, len(tokens))
+    
+    index_map = {}
+    subtoken_index = 0
+    
+    for i, token in enumerate(tokens):
+        subtokens_for_token = []
+        token_length = 0
+        
+        while token_length < len(token):
+            subtokens_for_token.append(subtoken_index)
+            token_length += len(subtokens[subtoken_index])
+            subtoken_index += 1
+        
+        index_map[i] = subtokens_for_token
+    
+    return index_map
+
+def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
+    print(sentence)
+    indexing_map = create_indexing_map(sentence, tokenizer)
+    subtoken_eigvecs = []
+    print(indexing_map)
+    print(eigvecs.shape)
+    for i, eigvec in enumerate(eigvecs):
+        subtoken_indices = indexing_map[i]
+        subtoken_eigvecs.extend([eigvec] * len(subtoken_indices))
+        for subtoken_index in subtoken_indices:
+            sinousoidal_encoding = positional_encoding(subtoken_index)
+            
+            #concatenate the eigenvector with the positional encoding
+            subtoken_eigvecs[subtoken_index] = np.concatenate((eigvec, sinousoidal_encoding))
+    return np.array(subtoken_eigvecs)        
