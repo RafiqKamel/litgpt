@@ -60,6 +60,8 @@ from litgpt.model import Block as BaseBlock
 from litgpt.model import CausalSelfAttention as BaseCausalSelfAttention
 from litgpt.model import KVCache
 from litgpt.utils import map_old_state_dict_weights
+from litgpt.special_tokens import new_tokens_amr
+from litgpt.positional_encodings_config import sinousidial_encodings_dim
 
 
 class LoRALayer(nn.Module):
@@ -546,7 +548,6 @@ class GPT(BaseModel):
         assert config.padded_vocab_size is not None
         self.config = config
         self.eig_vec_size = eig_vec_size
-
         self.lm_head = LoRALinear(
             config.n_embd,
             config.padded_vocab_size,
@@ -564,7 +565,8 @@ class GPT(BaseModel):
         )
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
-        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=eig_vec_size,output_dim=config.n_embd)
+        input_dim = eig_vec_size + sinousidial_encodings_dim
+        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=input_dim,output_dim=config.n_embd)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def forward(
@@ -579,10 +581,6 @@ class GPT(BaseModel):
             raise ValueError(
                 f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
             )
-
-
-
-
         if input_pos is not None:  # use the kv cache
             cos = self.cos.index_select(0, input_pos)
             sin = self.sin.index_select(0, input_pos)
@@ -593,7 +591,6 @@ class GPT(BaseModel):
             cos = self.cos[:T]
             sin = self.sin[:T]
             mask = None
-            
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
         # Process eigenvectors through the MLP to get positional encodings
         if eig_vecs is not None:
@@ -601,7 +598,7 @@ class GPT(BaseModel):
             pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros_like(x)    
+            pos_encodings = torch.zeros_like(x)      
         x[:, :pos_encodings.shape[1], :] += pos_encodings
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
