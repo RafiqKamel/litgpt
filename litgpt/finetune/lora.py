@@ -16,6 +16,7 @@ from lightning.fabric.utilities import ThroughputMonitor
 from lightning_utilities.core.imports import RequirementCache
 from torch.utils.data import DataLoader, ConcatDataset
 from torchmetrics import RunningMean
+from litgpt.prompts import PromptStyle
 import numpy as np
 
 from litgpt.args import EvalArgs, TrainArgs
@@ -475,11 +476,22 @@ def generate_example(
     graph_text =  "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
     graph = recreate_graph(graph_text)
     fabric.print(instruction)
-    prompt = data.prompt_style.apply(instruction)
+    prompt_style = "amr2text"
+    prompt_style_object = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
+        )
+    prompt = prompt_style_object.apply(instruction)
+    print("generate function", prompt, instruction)
     eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size//2)
     eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer)
-    eig_vec = torch.from_numpy(eig_vec)
+    eig_vec = torch.from_numpy(np.expand_dims(eig_vec, axis=0))
     encoded = tokenizer.encode(prompt, device=fabric.device)
+    if torch.equal(encoded[:3], torch.tensor([2, 2, 256000]).to(model.device)):
+        encoded[:3] = torch.tensor([256000, 2, 2]).to(model.device)
+    else:
+        print("unexpected input IDs in generate function",list(encoded)[:3], encoded)
     model.eval()
 
     with fabric.init_tensor():
