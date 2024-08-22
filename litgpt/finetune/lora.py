@@ -43,7 +43,8 @@ from litgpt.utils import (
     num_parameters,
     parse_devices,
     save_hyperparameters,
-    resize_model_vocabulary_size
+    resize_model_vocabulary_size,
+    process_eigenvectors_subtokens
 )
 
 
@@ -470,12 +471,13 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction =  "and :op1 mend :ARG1 fence :quant some :op2 get :ARG1 move :ARG1 country :mod this",
+    instruction =  "and :op1 mend :ARG1 fence :quant some :op2 get :ARG1 move :ARG1 country :mod this"
     graph_text =  "0 1\n0 8\n1 2\n8 9\n2 3\n3 4\n4 5\n5 6\n6 7\n9 10\n10 11\n11 12\n12 13\n13 14\n14 15"
     graph = recreate_graph(graph_text)
     fabric.print(instruction)
     prompt = data.prompt_style.apply(instruction)
     eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size//2)
+    eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer)
     eig_vec = torch.from_numpy(np.array([eig_vec]))
     encoded = tokenizer.encode(prompt, device=fabric.device)
     model.eval()
