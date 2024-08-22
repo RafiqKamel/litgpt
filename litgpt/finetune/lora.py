@@ -471,8 +471,8 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction =  "and :op1 mend :ARG1 fence :quant some :op2 get :ARG1 move :ARG1 country :mod this"
-    graph_text =  "0 1\n0 8\n1 2\n8 9\n2 3\n3 4\n4 5\n5 6\n6 7\n9 10\n10 11\n11 12\n12 13\n13 14\n14 15"
+    instruction =  "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
+    graph_text =  "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
     graph = recreate_graph(graph_text)
     fabric.print(instruction)
     prompt = data.prompt_style.apply(instruction)
