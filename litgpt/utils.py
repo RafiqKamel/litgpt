@@ -768,4 +768,7 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
             
             #concatenate the eigenvector with the positional encoding
             subtoken_eigvecs[subtoken_index] = np.concatenate((eigvec, sinousoidal_encoding))
+# add two zero vectors at the start and end of the eigenvectors to account for the special tokens <AMR> and <Text>
+    subtoken_eigvecs.insert(0, np.zeros_like(subtoken_eigvecs[0]))
+    subtoken_eigvecs.append(np.zeros_like(subtoken_eigvecs[0]))        
     return np.array(subtoken_eigvecs)        
