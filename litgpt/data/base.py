@@ -109,7 +109,12 @@ class SFTDataset(Dataset):
             eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
             eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
             self.data[idx]["eig_vec"] = eig_vec     
-
+        
+        if torch.equal(encoded_prompt_and_response[:3], torch.tensor([2, 2, 256000])):
+            encoded_prompt_and_response[:3] = torch.tensor([256000, 2, 2])
+        else:
+            print(list(encoded_prompt_and_response)[:3])
+            print(encoded_prompt_and_response)
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
