@@ -117,7 +117,7 @@ class GPT(nn.Module):
         return self.transformer.wte.weight
     
     def set_embeddings(self, embeddings_weights) -> None:
-        self.transformer.wte.weight.data = embeddings_weights
+        self.transformer.wte.weight.data = embeddings_weights.to(self.device)
 
     
     @classmethod
