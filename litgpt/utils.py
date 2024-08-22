@@ -750,7 +750,7 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
         
         while token_length < len(token):
             subtokens_for_token.append(subtoken_index)
-            token_length += len(subtokens[subtoken_index])
+            token_length += len(subtokens[subtoken_index].replace(" ", ""))
             subtoken_index += 1
         
         index_map[i] = subtokens_for_token
@@ -771,4 +771,4 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
 # add two zero vectors at the start and end of the eigenvectors to account for the special tokens <AMR> and <Text>
     subtoken_eigvecs.insert(0, np.zeros_like(subtoken_eigvecs[0]))
     subtoken_eigvecs.append(np.zeros_like(subtoken_eigvecs[0]))        
-    return np.array(subtoken_eigvecs)        
+    return np.array(subtoken_eigvecs)
