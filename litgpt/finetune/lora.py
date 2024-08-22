@@ -478,7 +478,7 @@ def generate_example(
     prompt = data.prompt_style.apply(instruction)
     eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size//2)
     eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer)
-    eig_vec = torch.from_numpy(np.array([eig_vec]))
+    eig_vec = torch.from_numpy(eig_vec)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     model.eval()
 
