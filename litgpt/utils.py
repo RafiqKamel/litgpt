@@ -12,9 +12,18 @@ from dataclasses import asdict, is_dataclass
 from io import BytesIO
 from packaging import version
 from pathlib import Path
-import subprocess
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Literal, Mapping, Optional, TypeVar, Union
-import warnings
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import lightning as L
 import torch
@@ -28,7 +37,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.cli import instantiate_class
 from torch.serialization import normalize_storage_type
 from typing_extensions import Self
-
+import networkx as nx
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -40,11 +49,17 @@ def init_out_dir(out_dir: Path) -> Path:
     return out_dir
 
 
-def find_resume_path(resume: Union[bool, Literal["auto"], Path], out_dir: Path) -> Optional[Path]:
+def find_resume_path(
+    resume: Union[bool, Literal["auto"], Path], out_dir: Path
+) -> Optional[Path]:
     if not resume or isinstance(resume, Path):
         return resume
 
-    resume_path = max(out_dir.rglob("step-*/*.pth"), key=(lambda p: int(p.parent.name.split("-")[1])), default=None)
+    resume_path = max(
+        out_dir.rglob("step-*/*.pth"),
+        key=(lambda p: int(p.parent.name.split("-")[1])),
+        default=None,
+    )
     if resume == "auto":
         return resume_path
     if resume is True and resume_path is None:
@@ -81,24 +96,17 @@ def reset_parameters(module: nn.Module) -> None:
 
 
 def check_valid_checkpoint_dir(
-        checkpoint_dir: Path,
-        model_filename: str = "lit_model.pth",
-        verbose: bool = True,
-        raise_error: bool = False,
-        ignore_tokenizer_files: bool = False
-    ) -> None:
-
+    checkpoint_dir: Path, model_filename: str = "lit_model.pth"
+) -> None:
     files = {
         model_filename: (checkpoint_dir / model_filename).is_file(),
         "model_config.yaml": (checkpoint_dir / "model_config.yaml").is_file(),
+        "tokenizer.json OR tokenizer.model": (
+            checkpoint_dir / "tokenizer.json"
+        ).is_file()
+        or (checkpoint_dir / "tokenizer.model").is_file(),
+        "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
     }
-    if not ignore_tokenizer_files:
-        files.update({
-            "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file() or
-                                                (checkpoint_dir / "tokenizer.model").is_file(),
-            "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
-        })
-
     if checkpoint_dir.is_dir():
         if all(files.values()):
             # we're good
@@ -124,7 +132,9 @@ def check_valid_checkpoint_dir(
         print(error_message, file=sys.stderr)
 
     if raise_error:
-        raise FileNotFoundError(f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}.")
+        raise FileNotFoundError(
+            f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
+        )
     else:
         raise SystemExit(1)
 
@@ -151,7 +161,13 @@ class SavingProxyForStorage:
         storage_key = saver._write_storage_and_return_key(storage)
         location = torch.serialization.location_tag(storage)
 
-        self.storage_info = ("storage", storage_type, storage_key, location, storage_numel)
+        self.storage_info = (
+            "storage",
+            storage_type,
+            storage_key,
+            location,
+            storage_numel,
+        )
 
     def __reduce_ex__(self, protocol_version):
         assert False, "this should be handled with out of band"
@@ -164,18 +180,28 @@ class SavingProxyForTensor:
         if reduce_args[0] == torch._utils._rebuild_tensor_v2:
             # for Tensors with Python attributes
             (a0, a1, (storage, *a2_other), *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (a0, a1, (storage_proxy, *a2_other), *other_reduce_args)
         else:
             (storage, *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (storage_proxy, *other_reduce_args)
 
     def __reduce_ex__(self, protocol_version):
         if protocol_version != self.protocol_version:
-            raise RuntimeError(f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}")
+            raise RuntimeError(
+                f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}"
+            )
         return self.reduce_ret_fn, self.reduce_args
 
 
@@ -305,30 +331,45 @@ def chunked_cross_entropy(
             logits = torch.cat(logits, dim=1)
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
-            return torch.nn.functional.cross_entropy(logits, targets, ignore_index=ignore_index)
+            return torch.nn.functional.cross_entropy(
+                logits, targets, ignore_index=ignore_index
+            )
 
         # chunk cross entropy
-        logit_chunks = [logit_chunk.reshape(-1, logit_chunk.size(-1)) for logit_chunk in logits]
-        target_chunks = [target_chunk.reshape(-1) for target_chunk in targets.split(logits[0].size(1), dim=1)]
+        logit_chunks = [
+            logit_chunk.reshape(-1, logit_chunk.size(-1)) for logit_chunk in logits
+        ]
+        target_chunks = [
+            target_chunk.reshape(-1)
+            for target_chunk in targets.split(logits[0].size(1), dim=1)
+        ]
         loss_chunks = [
-            torch.nn.functional.cross_entropy(logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none")
+            torch.nn.functional.cross_entropy(
+                logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none"
+            )
             for logit_chunk, target_chunk in zip(logit_chunks, target_chunks)
         ]
         non_masked_elems = (targets != ignore_index).sum()
         # See [non_masked_elems div note]
-        return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(torch.ones_like(non_masked_elems))
+        return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(
+            torch.ones_like(non_masked_elems)
+        )
 
     # no chunking at all
     logits = logits.reshape(-1, logits.size(-1))
     targets = targets.reshape(-1)
     if chunk_size == 0:
-        return torch.nn.functional.cross_entropy(logits, targets, ignore_index=ignore_index)
+        return torch.nn.functional.cross_entropy(
+            logits, targets, ignore_index=ignore_index
+        )
 
     # lm_head wasn't chunked, chunk cross entropy
     logit_chunks = logits.split(chunk_size)
     target_chunks = targets.split(chunk_size)
     loss_chunks = [
-        torch.nn.functional.cross_entropy(logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none")
+        torch.nn.functional.cross_entropy(
+            logit_chunk, target_chunk, ignore_index=ignore_index, reduction="none"
+        )
         for logit_chunk, target_chunk in zip(logit_chunks, target_chunks)
     ]
     non_masked_elems = (targets != ignore_index).sum()
@@ -336,7 +377,9 @@ def chunked_cross_entropy(
     #   max(1, non_masked_elems) would be more ergonomic to avoid a division by zero. However that
     #   results in a python int which is then passed back to torch division. By using the
     #   `x.maximum(torch.ones_like(x))` pattern we avoid a cudaStreamSynchronize.
-    return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(torch.ones_like(non_masked_elems))
+    return torch.cat(loss_chunks).sum() / non_masked_elems.maximum(
+        torch.ones_like(non_masked_elems)
+    )
 
 
 def map_old_state_dict_weights(state_dict: Dict, mapping: Mapping, prefix: str) -> Dict:
@@ -359,12 +402,16 @@ def get_default_supported_precision(training: bool) -> str:
     """
     from lightning.fabric.accelerators import MPSAccelerator
 
-    if MPSAccelerator.is_available() or (torch.cuda.is_available() and not torch.cuda.is_bf16_supported()):
+    if MPSAccelerator.is_available() or (
+        torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
+    ):
         return "16-mixed" if training else "16-true"
     return "bf16-mixed" if training else "bf16-true"
 
 
-def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
+def load_checkpoint(
+    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True
+) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
@@ -373,8 +420,12 @@ def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, s
         model.load_state_dict(state_dict, strict=strict)
 
 
-def flops_per_param(max_seq_length: int, n_layer: int, n_embd: int, n_params: int) -> int:
-    flops_per_token = 2 * n_params  # each parameter is used for a MAC (2 FLOPS) per network operation
+def flops_per_param(
+    max_seq_length: int, n_layer: int, n_embd: int, n_params: int
+) -> int:
+    flops_per_token = (
+        2 * n_params
+    )  # each parameter is used for a MAC (2 FLOPS) per network operation
     # this assumes that all samples have a fixed length equal to the block size
     # which is most likely false during finetuning
     flops_per_seq = flops_per_token * max_seq_length
@@ -395,12 +446,17 @@ def estimate_flops(model: "GPT", training: bool) -> int:
     # For a proper estimate, this needs a more fine-grained calculation as in Appendix A of the paper.
     n_trainable_params = num_parameters(model, requires_grad=True)
     trainable_flops = flops_per_param(
-        model.max_seq_length, model.config.n_layer, model.config.n_embd, n_trainable_params
+        model.max_seq_length,
+        model.config.n_layer,
+        model.config.n_embd,
+        n_trainable_params,
     )
     # forward + backward + gradients (assumes no gradient accumulation)
     ops_per_step = 3 if training else 1
     n_frozen_params = num_parameters(model, requires_grad=False)
-    frozen_flops = flops_per_param(model.max_seq_length, model.config.n_layer, model.config.n_embd, n_frozen_params)
+    frozen_flops = flops_per_param(
+        model.max_seq_length, model.config.n_layer, model.config.n_embd, n_frozen_params
+    )
     # forward + backward
     frozen_ops_per_step = 2 if training else 1
     return ops_per_step * trainable_flops + frozen_ops_per_step * frozen_flops
@@ -521,30 +577,51 @@ def choose_logger(
     **kwargs: Any,
 ):
     if logger_name == "csv":
-        return CSVLogger(root_dir=(out_dir / "logs"), name="csv", flush_logs_every_n_steps=log_interval, **kwargs)
+        return CSVLogger(
+            root_dir=(out_dir / "logs"),
+            name="csv",
+            flush_logs_every_n_steps=log_interval,
+            **kwargs,
+        )
     if logger_name == "tensorboard":
-        return TensorBoardLogger(root_dir=(out_dir / "logs"), name="tensorboard", **kwargs)
+        return TensorBoardLogger(
+            root_dir=(out_dir / "logs"), name="tensorboard", **kwargs
+        )
     if logger_name == "wandb":
         return WandbLogger(project=name, resume=resume, **kwargs)
-    raise ValueError(f"`--logger_name={logger_name}` is not a valid option. Choose from 'csv', 'tensorboard', 'wandb'.")
+    raise ValueError(
+        f"`--logger_name={logger_name}` is not a valid option. Choose from 'csv', 'tensorboard', 'wandb'."
+    )
 
 
 def get_argument_names(cls):
     sig = inspect.signature(cls.__init__)
-    return {name for name, param in sig.parameters.items()
-            if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]}
+    return {
+        name
+        for name, param in sig.parameters.items()
+        if param.kind
+        in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]
+    }
 
 
 def instantiate_bnb_optimizer(optimizer, model_parameters):
-    if (isinstance(optimizer, str) and "AdamW" not in optimizer) or (isinstance(optimizer, dict) and "AdamW" not in optimizer.get("class_path", "")):
-        raise ValueError("The chosen quantization format only supports the AdamW optimizer.")
+    if (isinstance(optimizer, str) and "AdamW" not in optimizer) or (
+        isinstance(optimizer, dict) and "AdamW" not in optimizer.get("class_path", "")
+    ):
+        raise ValueError(
+            "The chosen quantization format only supports the AdamW optimizer."
+        )
 
     import bitsandbytes as bnb
+
     if isinstance(optimizer, str):
         optimizer = bnb.optim.PagedAdamW(model_parameters)
     else:
         optim_args = get_argument_names(bnb.optim.PagedAdamW)
-        allowed_kwargs = {key: optimizer["init_args"][key] for key in optim_args & optimizer["init_args"].keys()}
+        allowed_kwargs = {
+            key: optimizer["init_args"][key]
+            for key in optim_args & optimizer["init_args"].keys()
+        }
         optimizer = bnb.optim.PagedAdamW(model_parameters, **allowed_kwargs)
     return optimizer
 
@@ -562,11 +639,25 @@ def instantiate_torch_optimizer(optimizer, model_parameters, **kwargs):
 
 def extend_checkpoint_dir(checkpoint_dir: Path) -> Path:
     new_checkpoint_dir = "checkpoints" / checkpoint_dir
-    should_return_new_dir = (not checkpoint_dir.is_dir() and
-                             checkpoint_dir.parts[0] != "checkpoints" and
-                             not checkpoint_dir.is_absolute() and
-                             new_checkpoint_dir.exists())
+    should_return_new_dir = (
+        not checkpoint_dir.is_dir()
+        and checkpoint_dir.parts[0] != "checkpoints"
+        and not checkpoint_dir.is_absolute()
+        and new_checkpoint_dir.exists()
+    )
     return new_checkpoint_dir if should_return_new_dir else checkpoint_dir
+
+
+def recreate_graph(edge_list_str: str):
+    # Split the string into lines
+    edge_list_lines = edge_list_str.strip().split("\n")
+
+    # Create a list of edge tuples
+    edges = [tuple(map(int, line.split())) for line in edge_list_lines]
+
+    # Create a new graph and add the edges
+    G_loaded = nx.Graph()
+    G_loaded.add_edges_from(edges)
 
 
 def check_file_size_on_cpu_and_warn(checkpoint_path, device, size_limit=4_509_715_660):
@@ -585,17 +676,29 @@ def check_file_size_on_cpu_and_warn(checkpoint_path, device, size_limit=4_509_71
     return size
 
 
-def auto_download_checkpoint(model_name, access_token=None, ignore_tokenizer_files=False):
-    from litgpt.scripts.download import download_from_hub  # moved here due to circular import issue
+def auto_download_checkpoint(
+    model_name, access_token=None, ignore_tokenizer_files=False
+):
+    from litgpt.scripts.download import (
+        download_from_hub,
+    )  # moved here due to circular import issue
 
     checkpoint_dir = extend_checkpoint_dir(Path(model_name))
     try:
-        check_valid_checkpoint_dir(checkpoint_dir, verbose=False, raise_error=True, ignore_tokenizer_files=ignore_tokenizer_files)
+        check_valid_checkpoint_dir(
+            checkpoint_dir,
+            verbose=False,
+            raise_error=True,
+            ignore_tokenizer_files=ignore_tokenizer_files,
+        )
     except FileNotFoundError as e:
         if access_token is None:
             access_token = os.getenv("HF_TOKEN")
 
-        if checkpoint_dir.parts[0] != "checkpoints" and not checkpoint_dir.is_absolute():
+        if (
+            checkpoint_dir.parts[0] != "checkpoints"
+            and not checkpoint_dir.is_absolute()
+        ):
             download_from_hub(repo_id=str(model_name), access_token=access_token)
             checkpoint_dir = Path("checkpoints") / checkpoint_dir
         else:
@@ -611,27 +714,31 @@ def check_nvlink_connectivity(fabric=None):
         custom_print = print
     if os.getenv("RANK", "0") == "0":
         try:
-            result = subprocess.run(["nvidia-smi", "topo", "-m"], stdout=subprocess.PIPE, text=True)
+            result = subprocess.run(
+                ["nvidia-smi", "topo", "-m"], stdout=subprocess.PIPE, text=True
+            )
 
             if result.returncode != 0:
                 custom_print("Failed to run nvidia-smi")
                 return
 
-            lines = result.stdout.split('\n')
+            lines = result.stdout.split("\n")
             gpu_matrix = []
 
-            start_index = next((i for i, line in enumerate(lines) if "GPU0" in line), None) + 1
+            start_index = (
+                next((i for i, line in enumerate(lines) if "GPU0" in line), None) + 1
+            )
             headers_line = lines[start_index - 1]
             headers = headers_line.split()
             # The regex is to avoid counting the "GPU NUMA ID" header as a GPU
             # in headers like ['\x1b[4mGPU0', 'GPU1', 'GPU2', 'GPU3', 'GPU4', 'GPU5', 'GPU6', 'GPU7', 'NIC0', 'NIC1', 'NIC2', 'NIC3', 'NIC4', 'NIC5', 'NIC6', 'NIC7', 'NIC8', 'NIC9', 'CPU', 'Affinity', 'NUMA', 'Affinity', 'GPU', 'NUMA', 'ID\x1b[0m']
-            gpu_regex = re.compile(r'^GPU\d+$')
+            gpu_regex = re.compile(r"^GPU\d+$")
             gpu_count = len([header for header in headers if gpu_regex.match(header)])
 
             all_nvlink = True
-            for line in lines[start_index:start_index + gpu_count]:
+            for line in lines[start_index : start_index + gpu_count]:
                 gpu_matrix.append(line.strip())
-                connections = line.split()[1:1 + gpu_count]
+                connections = line.split()[1 : 1 + gpu_count]
                 if not all("NV" in conn for conn in connections if conn != "X"):
                     all_nvlink = False
                     break
