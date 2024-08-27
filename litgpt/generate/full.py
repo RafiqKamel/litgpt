@@ -16,6 +16,7 @@ from litgpt import GPT, Config, PromptStyle, Tokenizer
 from litgpt.generate.base import generate
 from litgpt.prompts import has_prompt_style, load_prompt_style
 from litgpt.utils import (
+    check_file_size_on_cpu_and_warn,
     check_valid_checkpoint_dir,
     extend_checkpoint_dir,
     get_default_supported_precision,
@@ -38,10 +39,10 @@ def main(
     """For models finetuned with `litgpt finetune_full`.
 
     Generates a response based on a given instruction and an optional input. This script will only work with
-    checkpoints from the instruction-tuned GPT model. See ``litgpt.finetune.full``.
+    checkpoints from the instruction-tuned model. See ``litgpt.finetune.full``.
 
     Args:
-        checkpoint_dir: The path to the checkpoint folder with pretrained GPT weights.
+        checkpoint_dir: The path to the checkpoint folder with pretrained model weights.
         prompt: The prompt/instruction (Alpaca style).
         input: Optional input (Alpaca style).
         finetuned_path: Path to the checkpoint with trained weights, which are the output of
@@ -95,7 +96,7 @@ def main(
     config = Config.from_file(checkpoint_dir / "model_config.yaml")
 
     checkpoint_path = finetuned_path
-
+    check_file_size_on_cpu_and_warn(checkpoint_path, fabric.device)
     tokenizer = Tokenizer(checkpoint_dir)
     prompt_style = (
         load_prompt_style(checkpoint_dir) if has_prompt_style(checkpoint_dir) else PromptStyle.from_config(config)

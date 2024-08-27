@@ -17,6 +17,7 @@ from litgpt.adapter_v2 import GPT, Config
 from litgpt.generate.base import generate
 from litgpt.prompts import has_prompt_style, load_prompt_style
 from litgpt.utils import (
+    check_file_size_on_cpu_and_warn,
     check_valid_checkpoint_dir,
     extend_checkpoint_dir,
     get_default_supported_precision,
@@ -42,7 +43,7 @@ def main(
     checkpoints from the instruction-tuned adapter v2 model. See ``litgpt.finetune.adapter_v2``.
 
     Args:
-        checkpoint_dir: The path to the checkpoint folder with pretrained GPT weights.
+        checkpoint_dir: The path to the checkpoint folder with pretrained model weights.
         prompt: The prompt/instruction (Alpaca style).
         input: Optional input (Alpaca style).
         adapter_path: Path to the checkpoint with trained adapter weights, which are the output of
@@ -96,6 +97,7 @@ def main(
     config = Config.from_file(checkpoint_dir / "model_config.yaml")
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
+    check_file_size_on_cpu_and_warn(checkpoint_path, fabric.device)
 
     tokenizer = Tokenizer(checkpoint_dir)
     prompt_style = (

@@ -133,10 +133,7 @@ class TogetherComputerInstruct(PromptStyle):
 
 class Falcon(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
-        # First line could be modified. AFAIK Falcon doesn't impose a specific system prompt
-        # The instruction to not prefix its replies doesn't work always, but better than nothing
-        # I've also tried just "{prompt}\n" but the model seems to ramble more often
-        return f"Do not prefix your replies with 'Bot: '\nUser: {prompt}\n"
+        return f"{prompt}\nAnswer:"
 
     def stop_tokens(self, tokenizer: "Tokenizer") -> Tuple[List[int], ...]:
         return (
@@ -208,18 +205,16 @@ class Llama2(PromptStyle):
 
 class Llama3(PromptStyle):
     def apply(self, prompt: Union[str, List[Dict[str, str]]], **kwargs: str) -> str:
-        def has_system_prompt(messages: List[Dict[str, str]]) -> bool:
-            if len(messages):
-                return messages[0].get("role", "") == "system"
-            return False
+
+        default_system_prompt = "You are a helpful assistant."
 
         # https://github.com/meta-llama/llama3/blob/359887376f0aaf30e433f23e25df858d8c2a9833/llama/tokenizer.py#L202-L229
         if isinstance(prompt, str):
             return (
                 "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                "You are a helpful assistant.<|eot_id|>\n"  # The system prompt is optional
+                f"{default_system_prompt}<|eot_id|>"  # No newline
                 "<|start_header_id|>user<|end_header_id|>\n\n"
-                f"{prompt}<|eot_id|>"
+                f"{prompt}<|eot_id|>"  # No newline
                 "<|start_header_id|>assistant<|end_header_id|>\n\n"
             )
         elif isinstance(prompt, list):
@@ -296,7 +291,7 @@ class CodeLlama(PromptStyle):
         # for CodeLLama, we don't set a default system prompt, but it is supported:
         # https://huggingface.co/blog/codellama#conversational-instructions
         # Mistral does not: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
-        b_inst, e_inst = "<s>[INST]", "[/INST]"
+        b_inst, e_inst = "[INST]", "[/INST]"
         return f"{b_inst} {prompt} {e_inst}"
 
 
@@ -318,6 +313,11 @@ class Phi1(PromptStyle):
 class Phi2(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"Instruct: {prompt}\nOutput:"
+
+
+class Phi3(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<|system|>\nYou are a helpful assistant.<|end|>\n<|user|>\n{prompt}<|end|>\n<|assistant|>\n"
 
 
 class TinyLlama(PromptStyle):
@@ -368,6 +368,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "codellama": CodeLlama,
     "phi-1": Phi1,
     "phi-2": Phi2,
+    "phi-3": Phi3,
     "tinyllama": TinyLlama,
     "gemma": Gemma,
     "amr2text": AMR2Text,
@@ -403,12 +404,14 @@ def model_name_to_prompt_style(model_name: str) -> PromptStyle:
         return Platypus()
     if re.search("Nous-Hermes", model_name):
         return NousResearch()
-    if re.search("CodeLlama|Mistral.*Instruct", model_name):
+    if re.search("CodeLlama|Mi[sx]tral.*Instruct", model_name):
         return CodeLlama()
     if re.search("phi-1", model_name):
         return Phi1()
     if re.search("phi-2", model_name):
         return Phi2()
+    if re.search("Phi-3", model_name):
+        return Phi3()
     if re.search(r"tiny-llama.*chat", model_name):
         return TinyLlama()
     if re.search(r"(Code)?Gemma.*-it", model_name):

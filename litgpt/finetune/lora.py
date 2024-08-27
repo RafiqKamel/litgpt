@@ -30,12 +30,13 @@ from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.tokenizer import Tokenizer
 from litgpt.special_tokens import new_tokens_amr
 from litgpt.utils import (
+    auto_download_checkpoint,
+    check_nvlink_connectivity,
     CycleIterator,
     check_valid_checkpoint_dir,
     choose_logger,
     chunked_cross_entropy,
     copy_config_files,
-    extend_checkpoint_dir,
     get_default_supported_precision,
     load_checkpoint,
     init_out_dir,
@@ -45,7 +46,7 @@ from litgpt.utils import (
     parse_devices,
     save_hyperparameters,
     resize_model_vocabulary_size,
-    process_eigenvectors_subtokens
+    process_eigenvectors_subtokens,
 )
 
 
@@ -57,6 +58,7 @@ def setup(
         Literal["bnb.nf4", "bnb.nf4-dq", "bnb.fp4", "bnb.fp4-dq", "bnb.int8-training"]
     ] = None,
     devices: Union[int, str] = 1,
+    num_nodes: int = 1,
     lora_r: int = 8,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -80,6 +82,7 @@ def setup(
     optimizer: Union[str, Dict] = "AdamW",
     logger_name: Literal["wandb", "tensorboard", "csv"] = "csv",
     seed: int = 1337,
+    access_token: Optional[str] = None,
 ) -> None:
     """Finetune a model using the LoRA method.
 
@@ -90,6 +93,7 @@ def setup(
         precision: The precision to use for finetuning. Possible choices: "bf16-true", "bf16-mixed", "32-true".
         quantize: If set, quantize the model with this algorithm. See ``tutorials/quantize.md`` for more information.
         devices: How many devices/GPUs to use.
+        num_nodes: How many nodes the code is being run on.
         lora_r: The LoRA rank.
         lora_alpha: The LoRA alpha.
         lora_dropout: The LoRA dropout value.
@@ -105,8 +109,11 @@ def setup(
         optimizer: An optimizer name (such as "AdamW") or config.
         logger_name: The name of the logger to send metrics to.
         seed: The random seed to use for reproducibility.
+        access_token: Optional API token to access models with restrictions.
     """
-    checkpoint_dir = extend_checkpoint_dir(checkpoint_dir)
+    checkpoint_dir = auto_download_checkpoint(
+        model_name=checkpoint_dir, access_token=access_token
+    )
     pprint(locals())
     data = Alpaca() if data is None else data
     devices = parse_devices(devices)
@@ -151,11 +158,11 @@ def setup(
         plugins = BitsandbytesPrecision(quantize[4:], dtype)
         precision = None
 
-    if devices > 1:
+    if devices * num_nodes > 1:
         if quantize:
             raise NotImplementedError(
-                "Quantization is currently not supported for multi-GPU training. Please set devices=1 when using the"
-                " --quantize flag."
+                "Quantization is currently not supported for multi-GPU training. Please set devices=1 and num_nodes=1"
+                " when using the --quantize flag."
             )
         strategy = FSDPStrategy(
             auto_wrap_policy={Block},
@@ -169,11 +176,16 @@ def setup(
 
     fabric = L.Fabric(
         devices=devices,
+        num_nodes=num_nodes,
         strategy=strategy,
         precision=precision,
         loggers=logger,
         plugins=plugins,
     )
+
+    if torch.cuda.is_available() and devices > 1:
+        check_nvlink_connectivity(fabric)
+
     fabric.launch(
         main,
         devices,
@@ -218,7 +230,7 @@ def main(
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
     with fabric.init_module(empty_init=(devices > 1)):
-        model = GPT(config, eig_vec_size=train.max_seq_length*2)
+        model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
 
     fabric.print(
@@ -242,9 +254,8 @@ def main(
 
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
-    
+
     resize_model_vocabulary_size(model, len(new_tokens_amr))
-    
 
     train_time = time.perf_counter()
     fit(
@@ -288,11 +299,13 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
-        torch.save(model.positional_encoding_mlp.state_dict(), save_path.parent / "pos_encoding_weights.pth")
+        torch.save(
+            model.positional_encoding_mlp.state_dict(),
+            save_path.parent / "pos_encoding_weights.pth",
+        )
         merge_lora(checkpoint_dir=save_path.parent)
         # save weight for postional encoding layer
         # Save the weights for the positional encoding layer
-        
 
 
 def fit(
@@ -456,7 +469,11 @@ def validate(
     for k, batch in enumerate(val_dataloader):
         if k >= eval.max_iters:
             break
-        input_ids, targets, eig_vec = batch["input_ids"], batch["labels"], batch["eig_vec"]
+        input_ids, targets, eig_vec = (
+            batch["input_ids"],
+            batch["labels"],
+            batch["eig_vec"],
+        )
         logits = model(input_ids, eig_vec)
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
@@ -472,26 +489,28 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction =  "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
-    graph_text =  "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
+    instruction = "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
+    graph_text = "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
     graph = recreate_graph(graph_text)
     fabric.print(instruction)
     prompt_style = "amr2text"
     prompt_style_object = (
-            prompt_style
-            if isinstance(prompt_style, PromptStyle)
-            else PromptStyle.from_name(prompt_style)
-        )
+        prompt_style
+        if isinstance(prompt_style, PromptStyle)
+        else PromptStyle.from_name(prompt_style)
+    )
     prompt = prompt_style_object.apply(instruction)
     print("generate function", prompt, instruction)
-    eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size//2)
-    eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer)
+    eig_vec = magnetic_laplacian_eigenvectors(graph, model.eig_vec_size // 2)
+    eig_vec = process_eigenvectors_subtokens(
+        eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer
+    )
     eig_vec = torch.from_numpy(np.expand_dims(eig_vec, axis=0))
     encoded = tokenizer.encode(prompt, device=fabric.device)
     if torch.equal(encoded[:3], torch.tensor([2, 2, 256000]).to(model.device)):
         encoded[:3] = torch.tensor([256000, 2, 2]).to(model.device)
     else:
-        print("unexpected input IDs in generate function",list(encoded)[:3], encoded)
+        print("unexpected input IDs in generate function", list(encoded)[:3], encoded)
     model.eval()
 
     with fabric.init_tensor():
@@ -503,7 +522,7 @@ def generate_example(
         max_returned_tokens=len(encoded) + eval.max_new_tokens,
         temperature=0.8,
         eos_id=tokenizer.eos_id,
-        eig_vec = eig_vec
+        eig_vec=eig_vec,
     )
     model.clear_kv_cache()
     model.train()

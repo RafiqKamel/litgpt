@@ -6,8 +6,8 @@ import litgpt.config
 from litgpt import Config
 from litgpt.prompts import (
     Alpaca,
-    Llama3,
     Default,
+    Llama3,
     PromptStyle,
     has_prompt_style,
     load_prompt_style,
@@ -53,6 +53,7 @@ def test_prompt_style_from_config():
         "Llama-2-70b-chat-hf",
         "Llama-3-8B-Instruct",
         "Llama-3-70B-Instruct",
+        "Llama-3.1-405B-Instruct",
         "Gemma-2b-it",
         "Gemma-7b-it",
         "FreeWilly2",
@@ -62,6 +63,7 @@ def test_prompt_style_from_config():
         "CodeLlama-70b-Instruct-hf",
         "phi-1_5",
         "phi-2",
+        "Phi-3-mini-4k-instruct",
         "Mistral-7B-Instruct-v0.1",
         "Mistral-7B-Instruct-v0.2",
         "tiny-llama-1.1b-chat",
@@ -152,8 +154,7 @@ def test_multiturn_prompt():
 
     assert multiturn_output == """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-You are a helpful AI assistant for travel tips and recommendations<|eot_id|>
-<|start_header_id|>user<|end_header_id|>
+You are a helpful AI assistant for travel tips and recommendations<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 What is France's capital?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
@@ -173,8 +174,7 @@ What can I do there?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
     assert multiturn_output == """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-You are a helpful assistant.<|eot_id|>
-<|start_header_id|>user<|end_header_id|>
+You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 What is France's capital?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 

@@ -5,10 +5,12 @@ import inspect
 import math
 import os
 import pickle
+import re
 import shutil
 import sys
 from dataclasses import asdict, is_dataclass
 from io import BytesIO
+from packaging import version
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -38,7 +40,14 @@ from typing_extensions import Self
 import networkx as nx
 import yaml
 import numpy as np
-from litgpt.positional_encodings_config import sinousidial_encodings_q, sinousidial_encodings_dim
+from litgpt.positional_encodings_config import (
+    sinousidial_encodings_q,
+    sinousidial_encodings_dim,
+)
+from litgpt.utils import add_prefix_to_dict_keys
+
+import warnings
+import subprocess
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -97,7 +106,9 @@ def reset_parameters(module: nn.Module) -> None:
 
 
 def check_valid_checkpoint_dir(
-    checkpoint_dir: Path, model_filename: str = "lit_model.pth"
+    checkpoint_dir: Path,
+    model_filename: str = "lit_model.pth",
+    raise_error: bool = True,
 ) -> None:
     files = {
         model_filename: (checkpoint_dir / model_filename).is_file(),
@@ -124,13 +135,12 @@ def check_valid_checkpoint_dir(
     else:
         extra = ""
 
-    error_message = (
-        f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
-        "\nFind download instructions at https://github.com/Lightning-AI/litgpt/blob/main/tutorials\n"
-        f"{extra}\nSee all download options by running:\n litgpt download"
-    )
-    print(error_message, file=sys.stderr)
-    raise SystemExit(1)
+    if raise_error:
+        raise FileNotFoundError(
+            f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
+        )
+    else:
+        raise SystemExit(1)
 
 
 class SavingProxyForStorage:
@@ -290,7 +300,14 @@ class incremental_save:
         if storage.device.type != "cpu":
             storage = storage.cpu()
         num_bytes = storage.nbytes()
-        self.zipfile.write_record(name, storage.data_ptr(), num_bytes)
+
+        current_version = version.parse(torch.__version__)
+        threshold_version = version.parse("2.2.2")
+        if current_version <= threshold_version:
+            self.zipfile.write_record(name, storage.data_ptr(), num_bytes)
+        else:
+            self.zipfile.write_record(name, storage, num_bytes)
+
         return key
 
     def __exit__(self, type, value, traceback):
@@ -397,15 +414,23 @@ def get_default_supported_precision(training: bool) -> str:
 
 
 def load_checkpoint(
-    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True, load_pos_encoding_weights: bool = False,
+    fabric: L.Fabric,
+    model: nn.Module,
+    checkpoint_path: Path,
+    strict: bool = True,
+    load_pos_encoding_weights: bool = False,
 ) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
         state_dict = lazy_load(checkpoint_path)
         if load_pos_encoding_weights:
-            state_dict_positional = lazy_load(checkpoint_path.parent/"pos_encoding_weights.pth")
-            state_dict_positional = add_prefix_to_dict_keys(state_dict_positional, "positional_encoding_mlp.")
+            state_dict_positional = lazy_load(
+                checkpoint_path.parent / "pos_encoding_weights.pth"
+            )
+            state_dict_positional = add_prefix_to_dict_keys(
+                state_dict_positional, "positional_encoding_mlp."
+            )
             state_dict.update(state_dict_positional)
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
@@ -664,7 +689,7 @@ def load_properties_from_yaml(file_path):
         dict: A dictionary containing the properties from the YAML file.
     """
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             properties = yaml.safe_load(file)
             return properties
     except FileNotFoundError:
@@ -673,6 +698,8 @@ def load_properties_from_yaml(file_path):
     except yaml.YAMLError as e:
         print(f"Error: The file {file_path} is not a valid YAML file. {e}")
         return None
+
+
 def add_prefix_to_dict_keys(dict, prefix):
     """
     Add a prefix to all keys in a dictionary.
@@ -684,6 +711,7 @@ def add_prefix_to_dict_keys(dict, prefix):
         dict: The dictionary with the prefix added to all keys.
     """
     return {f"{prefix}{key}": value for key, value in dict.items()}
+
 
 def resize_model_vocabulary_size(model, number_of_new_tokens):
     """
@@ -703,18 +731,22 @@ def resize_model_vocabulary_size(model, number_of_new_tokens):
     new_embeddings[:old_vocab_size, :] = old_embeddings
 
     # Initialize the new part of the embedding matrix with Xavier initialization
-    new_embeddings[old_vocab_size:, :] = xavier_initialization((new_vocabulary_size - old_vocab_size, embedding_dim))
-    
+    new_embeddings[old_vocab_size:, :] = xavier_initialization(
+        (new_vocabulary_size - old_vocab_size, embedding_dim)
+    )
+
     # Set the new embedding matrix back to the model
     model.set_embeddings(new_embeddings)
     model.lm_head.resize_output(new_vocabulary_size)
+
 
 def xavier_initialization(shape):
     return torch.tensor(np.random.randn(*shape) * np.sqrt(2 / (shape[0] + shape[1])))
 
 
-
-def positional_encoding(index, d_model=sinousidial_encodings_dim, q=sinousidial_encodings_q):
+def positional_encoding(
+    index, d_model=sinousidial_encodings_dim, q=sinousidial_encodings_q
+):
     """
     Generate the sinusoidal positional encoding for a specific position in a sequence.
 
@@ -727,35 +759,37 @@ def positional_encoding(index, d_model=sinousidial_encodings_dim, q=sinousidial_
     - np.ndarray: The positional encoding for the given index.
     """
     encoding = np.zeros(d_model)
-    
+
     for i in range(0, d_model, 2):
         angle = index / np.power(q, (2 * (i // 2)) / d_model)
         encoding[i] = np.sin(angle)
         if i + 1 < d_model:
             encoding[i + 1] = np.cos(angle)
-    
+
     return encoding
+
 
 def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
     tokens = sentence.split()
     ids = tokenizer.encode(sentence)
     subtokens = [tokenizer.decode(id) for id in ids]
-    
+
     index_map = {}
     subtoken_index = 0
-    
+
     for i, token in enumerate(tokens):
         subtokens_for_token = []
         token_length = 0
-        
+
         while token_length < len(token):
             subtokens_for_token.append(subtoken_index)
             token_length += len(subtokens[subtoken_index].replace(" ", ""))
             subtoken_index += 1
-        
+
         index_map[i] = subtokens_for_token
-    
+
     return index_map
+
 
 def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
     indexing_map = create_indexing_map(sentence, tokenizer)
@@ -765,8 +799,105 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
         subtoken_eigvecs.extend([eigvec] * len(subtoken_indices))
         for subtoken_index in subtoken_indices:
             sinousoidal_encoding = positional_encoding(subtoken_index)
-            
-            #concatenate the eigenvector with the positional encoding
-            subtoken_eigvecs[subtoken_index] = np.concatenate((eigvec, sinousoidal_encoding))
-            
+
+            # concatenate the eigenvector with the positional encoding
+            subtoken_eigvecs[subtoken_index] = np.concatenate(
+                (eigvec, sinousoidal_encoding)
+            )
+
     return np.array(subtoken_eigvecs)
+
+
+def check_file_size_on_cpu_and_warn(checkpoint_path, device, size_limit=4_509_715_660):
+    """
+    Checks the file size and raises a warning if it exceeds the size_limit.
+    The default size limit is 4.2 GB, the size of TinyLlama 1.1B: 4.2 * 1024 * 1024 * 1024 = 4_509_715_660
+    """
+    size = 0.0
+    if os.path.exists(checkpoint_path):
+        size = os.path.getsize(checkpoint_path)
+        if size > size_limit and str(device) == "cpu":
+            warnings.warn(
+                f"The file size of {checkpoint_path} is over {size_limit/1024/1024/1024:.1f} GB. Using a model "
+                "with more than 1B parameters on a CPU can be slow, it is recommended to switch to a GPU."
+            )
+    return size
+
+
+def auto_download_checkpoint(
+    model_name, access_token=None, ignore_tokenizer_files=False
+):
+    from litgpt.scripts.download import (
+        download_from_hub,
+    )  # moved here due to circular import issue
+
+    checkpoint_dir = extend_checkpoint_dir(Path(model_name))
+    try:
+        check_valid_checkpoint_dir(
+            checkpoint_dir,
+            verbose=False,
+            raise_error=True,
+            ignore_tokenizer_files=ignore_tokenizer_files,
+        )
+    except FileNotFoundError as e:
+        if access_token is None:
+            access_token = os.getenv("HF_TOKEN")
+
+        if (
+            checkpoint_dir.parts[0] != "checkpoints"
+            and not checkpoint_dir.is_absolute()
+        ):
+            download_from_hub(repo_id=str(model_name), access_token=access_token)
+            checkpoint_dir = Path("checkpoints") / checkpoint_dir
+        else:
+            raise e
+
+    return checkpoint_dir
+
+
+def check_nvlink_connectivity(fabric=None):
+    if fabric is not None:
+        custom_print = fabric.print
+    else:
+        custom_print = print
+    if os.getenv("RANK", "0") == "0":
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "topo", "-m"], stdout=subprocess.PIPE, text=True
+            )
+
+            if result.returncode != 0:
+                custom_print("Failed to run nvidia-smi")
+                return
+
+            lines = result.stdout.split("\n")
+            gpu_matrix = []
+
+            start_index = (
+                next((i for i, line in enumerate(lines) if "GPU0" in line), None) + 1
+            )
+            headers_line = lines[start_index - 1]
+            headers = headers_line.split()
+            # The regex is to avoid counting the "GPU NUMA ID" header as a GPU
+            # in headers like ['\x1b[4mGPU0', 'GPU1', 'GPU2', 'GPU3', 'GPU4', 'GPU5', 'GPU6', 'GPU7', 'NIC0', 'NIC1', 'NIC2', 'NIC3', 'NIC4', 'NIC5', 'NIC6', 'NIC7', 'NIC8', 'NIC9', 'CPU', 'Affinity', 'NUMA', 'Affinity', 'GPU', 'NUMA', 'ID\x1b[0m']
+            gpu_regex = re.compile(r"^GPU\d+$")
+            gpu_count = len([header for header in headers if gpu_regex.match(header)])
+
+            all_nvlink = True
+            for line in lines[start_index : start_index + gpu_count]:
+                gpu_matrix.append(line.strip())
+                connections = line.split()[1 : 1 + gpu_count]
+                if not all("NV" in conn for conn in connections if conn != "X"):
+                    all_nvlink = False
+                    break
+
+            if all_nvlink:
+                custom_print("All GPUs are fully connected via NVLink.")
+            else:
+                custom_print(
+                    "Warning: Not all GPUs are fully connected via NVLink. Some GPUs are connected via slower interfaces. "
+                    "It is recommended to switch to a different machine with faster GPU connections for optimal multi-GPU training performance."
+                )
+
+        except Exception as e:
+            custom_print(f"An error occurred: {e}")

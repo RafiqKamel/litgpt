@@ -5,7 +5,7 @@ import os
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, NamedTemporaryFile
 from unittest import mock
 
 import pytest
@@ -25,6 +25,8 @@ from litgpt.utils import (
     CLI,
     CycleIterator,
     capture_hparams,
+    check_file_size_on_cpu_and_warn,
+    check_nvlink_connectivity,
     check_valid_checkpoint_dir,
     choose_logger,
     chunked_cross_entropy,
@@ -426,3 +428,157 @@ def test_extend_checkpoint_dir(input_path, expected):
 ])
 def test_extend_checkpoint_dir_dont_exist(input_path, expected):
     assert extend_checkpoint_dir(input_path) == expected
+
+
+def test_file_size_below_limit_on_cpu():
+    # Test file size below limit on CPU
+    with NamedTemporaryFile() as temp_file:
+        with mock.patch("os.path.getsize", return_value=4_000_000_000):
+            size = check_file_size_on_cpu_and_warn(temp_file.name, "cpu")
+            assert size == 4_000_000_000
+
+
+def test_file_size_above_limit_on_cpu():
+    # Test file size above limit on CPU
+    with NamedTemporaryFile() as temp_file:
+        with mock.patch("os.path.getsize", return_value=4_600_000_000):
+            with pytest.warns(UserWarning) as record:
+                size = check_file_size_on_cpu_and_warn(temp_file.name, "cpu")
+            assert size == 4_600_000_000
+            assert "over 4.2 GB" in str(record[0].message)
+
+
+def test_file_size_above_limit_on_gpu():
+    # Test file size above limit on GPU should not warn
+    with NamedTemporaryFile() as temp_file:
+        with mock.patch("os.path.getsize", return_value=4_600_000_000):
+            size = check_file_size_on_cpu_and_warn(temp_file.name, "gpu")
+            assert size == 4_600_000_000
+
+
+@pytest.fixture
+def all_nvlink_connected_output():
+    return mock.MagicMock(stdout="""        GPU0	GPU1	GPU2	GPU3
+GPU0	X	NV12	NV12	NV12
+GPU1	NV12	X	NV12	NV12
+GPU2	NV12	NV12	X	NV12
+GPU3	NV12	NV12	NV12	X""", returncode=0)
+
+
+@mock.patch("subprocess.run")
+def test_all_nvlink_connected(mock_run, all_nvlink_connected_output):
+    mock_run.return_value = all_nvlink_connected_output
+    with mock.patch("builtins.print") as mock_print:
+        check_nvlink_connectivity()
+        mock_print.assert_any_call("All GPUs are fully connected via NVLink.")
+
+
+@pytest.fixture
+def nvlink_partially_connected_output():
+    return mock.MagicMock(stdout="""        GPU0    GPU1    GPU2    GPU3    CPU Affinity
+GPU0     X      NV1     SYS     SYS     0-7
+GPU1    NV1      X      SYS     SYS     0-7
+GPU2    SYS     SYS      X      NV1     8-15
+GPU3    SYS     SYS     NV1      X      8-15
+
+Legend:
+  X   = Self
+  NV1 = Connected via NVLink with 1 hop
+  SYS = Connected via the PCIe or CPU subsystem""", returncode=0)
+
+
+@mock.patch("subprocess.run")
+def test_nvlink_partially_connected_output(mock_run, nvlink_partially_connected_output):
+    mock_run.return_value = nvlink_partially_connected_output
+    with mock.patch("builtins.print") as mock_print:
+        check_nvlink_connectivity()
+        mock_print.assert_any_call(
+            "Warning: Not all GPUs are fully connected via NVLink. Some GPUs are connected via slower interfaces. "
+            "It is recommended to switch to a different machine with faster GPU connections for optimal multi-GPU training performance."
+        )
+
+
+@pytest.fixture
+def nvlink_not_connected_output():
+    return mock.MagicMock(stdout="""        GPU0    GPU1    GPU2    GPU3    CPU Affinity    NUMA Affinity   GPU NUMA ID
+GPU0     X      PHB     PHB     PHB     0-47    0               N/A
+GPU1    PHB      X      PHB     PHB     0-47    0               N/A
+GPU2    PHB     PHB      X      PHB     0-47    0               N/A
+GPU3    PHB     PHB     PHB      X      0-47    0               N/A
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks""", returncode=0)
+
+
+@mock.patch("subprocess.run")
+def test_nvlink_not_connected_output(mock_run, nvlink_not_connected_output):
+    mock_run.return_value = nvlink_not_connected_output
+    with mock.patch("builtins.print") as mock_print:
+        check_nvlink_connectivity()
+        mock_print.assert_any_call(
+            "Warning: Not all GPUs are fully connected via NVLink. Some GPUs are connected via slower interfaces. "
+            "It is recommended to switch to a different machine with faster GPU connections for optimal multi-GPU training performance."
+        )
+
+
+@pytest.fixture
+def nvlink_all_gpu_connected_but_other_connected_output():
+    return mock.MagicMock(stdout="""	GPU0	GPU1	GPU2	GPU3	GPU4	GPU5	GPU6	GPU7	NIC0	NIC1	NIC2	NIC3	NIC4	NIC5	NIC6	NIC7	NIC8	NIC9	CPU Affinity	NUMA Affinity	GPU NUMA ID
+GPU0	X 	NV12	NV12	NV12	NV12	NV12	NV12	NV12	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	0-63,128-191	0		N/A
+GPU1	NV12	X 	NV12	NV12	NV12	NV12	NV12	NV12	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	0-63,128-191	0		N/A
+GPU2	NV12	NV12	X 	NV12	NV12	NV12	NV12	NV12	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	0-63,128-191	0		N/A
+GPU3	NV12	NV12	NV12	X 	NV12	NV12	NV12	NV12	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	0-63,128-191	0		N/A
+GPU4	NV12	NV12	NV12	NV12	X 	NV12	NV12	NV12	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	PXB	PXB	64-127,192-254	1		N/A
+GPU5	NV12	NV12	NV12	NV12	NV12	X 	NV12	NV12	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	PXB	PXB	64-127,192-254	1		N/A
+GPU6	NV12	NV12	NV12	NV12	NV12	NV12	X 	NV12	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	64-127,192-254	1		N/A
+GPU7	NV12	NV12	NV12	NV12	NV12	NV12	NV12	X 	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	64-127,192-254	1		N/A
+NIC0	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	X 	PIX	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS				
+NIC1	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	PIX	X 	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS				
+NIC2	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	X 	PXB	SYS	SYS	SYS	SYS	SYS	SYS				
+NIC3	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	PXB	X 	SYS	SYS	SYS	SYS	SYS	SYS				
+NIC4	SYS	SYS	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	X 	PXB	SYS	SYS	SYS	SYS				
+NIC5	SYS	SYS	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	PXB	X 	SYS	SYS	SYS	SYS				
+NIC6	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	X 	PIX	SYS	SYS				
+NIC7	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	PIX	X 	SYS	SYS				
+NIC8	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	X 	PXB				
+NIC9	SYS	SYS	SYS	SYS	PXB	PXB	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	SYS	PXB	X 				
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks
+
+NIC Legend:
+
+  NIC0: mlx5_0
+  NIC1: mlx5_1
+  NIC2: mlx5_2
+  NIC3: mlx5_3
+  NIC4: mlx5_4
+  NIC5: mlx5_5
+  NIC6: mlx5_6
+  NIC7: mlx5_7
+  NIC8: mlx5_8
+  NIC9: mlx5_9
+
+""", returncode=0)
+
+
+@mock.patch("subprocess.run")
+def test_nvlink_all_gpu_connected_but_other_connected_output(mock_run, nvlink_all_gpu_connected_but_other_connected_output):
+    mock_run.return_value = nvlink_all_gpu_connected_but_other_connected_output
+    with mock.patch("builtins.print") as mock_print:
+        check_nvlink_connectivity()
+        mock_print.assert_any_call("All GPUs are fully connected via NVLink.")
