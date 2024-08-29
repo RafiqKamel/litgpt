@@ -124,7 +124,6 @@ class SFTDataset(Dataset):
         else:
             print("mistake",list(encoded_prompt_and_response)[:3])
             print(encoded_prompt_and_response)
-        print("sizes", encoded_prompt_and_response.shape, encoded_prompt.shape, eig_vec.shape)  
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
