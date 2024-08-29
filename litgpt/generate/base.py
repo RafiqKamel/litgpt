@@ -96,6 +96,7 @@ def generate_fn(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
+    eig_vec: torch.Tensor,
     *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
@@ -134,9 +135,10 @@ def generate_fn(
 
         # Generate the token
         token = next_token(
-            model,
-            input_pos,
-            token.view(1, -1),
+            model= model,
+            eig_vec=None,
+            input_pos=input_pos,
+            x=token.view(1, -1),
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
@@ -229,6 +231,7 @@ def generate(
             include_eos=True,
             model=model,
             prompt=prompt,
+            eig_vec=eig_vec,
             max_returned_tokens=max_returned_tokens,
             temperature=temperature,
             top_k=top_k,
