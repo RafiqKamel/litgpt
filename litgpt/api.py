@@ -36,6 +36,7 @@ from litgpt.utils import (
     get_default_supported_precision,
     load_checkpoint,
     save_config,
+    load_properties_from_yaml   
 )
 
 
@@ -65,6 +66,8 @@ class LLM(torch.nn.Module):
         self.kv_cache_initialized = kv_cache_initialized
         self.fixed_kv_cache_size = fixed_kv_cache_size
         self.prev_generated_seq_length = 0
+        self.eig_vec_size = model.eig_vec_size
+        self.device = model.device
 
     """
     LLM model class for inference, pretraining, and finetuning.
@@ -225,16 +228,20 @@ class LLM(torch.nn.Module):
                 devices=1,
                 precision=get_default_supported_precision(training=False),
             )
-
+            hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
+            eig_vec_size = hp_config["train"]["max_seq_length"] * 2
+            corrected_vocab_size = tokenizer.processor.get_vocab_size()
+            config.padded_vocab_size = corrected_vocab_size
             with fabric.init_module(empty_init=False):
-                model = GPT(config)
+                model = GPT(config, eig_vec_size=eig_vec_size)
             model.eval()
             preprocessor = Preprocessor(tokenizer, device=fabric.device)
+            print("dimensions of embeddings and tokenizer",model.transformer.wte.weight.size(), preprocessor.tokenizer.processor.get_vocab_size())
 
             if checkpoint_dir is not None:
                 checkpoint_path = checkpoint_dir / "lit_model.pth"
                 check_file_size_on_cpu_and_warn(checkpoint_path, fabric.device)
-                load_checkpoint(fabric, model, checkpoint_path)
+                load_checkpoint(fabric, model, checkpoint_path, load_pos_encoding_weights=True)
 
             model = fabric.setup_module(model)
 
@@ -451,7 +458,8 @@ class LLM(torch.nn.Module):
         top_k: Optional[int] = None,
         top_p: float = 1.0,
         return_as_token_ids: bool = False,
-        stream: bool = False
+        stream: bool = False,
+        eig_vec: Optional[torch.Tensor] = None
     ) -> Union[str, torch.Tensor]:
         """
         Takes a conditioning sequence (prompt) as input and continues to generate as many tokens as requested.
@@ -540,6 +548,7 @@ class LLM(torch.nn.Module):
                 top_p=top_p,
                 eos_id=self.preprocessor.tokenizer.eos_id,
                 include_prompt=False,
+                eig_vec=eig_vec
             )
 
         if stream:
