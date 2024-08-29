@@ -44,7 +44,6 @@ from litgpt.positional_encodings_config import (
     sinousidial_encodings_q,
     sinousidial_encodings_dim,
 )
-from litgpt.utils import add_prefix_to_dict_keys
 
 import warnings
 import subprocess
@@ -104,21 +103,25 @@ def reset_parameters(module: nn.Module) -> None:
         if callable(getattr(mod, "reset_parameters", None)):
             mod.reset_parameters()
 
-
 def check_valid_checkpoint_dir(
-    checkpoint_dir: Path,
-    model_filename: str = "lit_model.pth",
-    raise_error: bool = True,
-) -> None:
+        checkpoint_dir: Path,
+        model_filename: str = "lit_model.pth",
+        verbose: bool = True,
+        raise_error: bool = False,
+        ignore_tokenizer_files: bool = False
+    ) -> None:
+
     files = {
         model_filename: (checkpoint_dir / model_filename).is_file(),
         "model_config.yaml": (checkpoint_dir / "model_config.yaml").is_file(),
-        "tokenizer.json OR tokenizer.model": (
-            checkpoint_dir / "tokenizer.json"
-        ).is_file()
-        or (checkpoint_dir / "tokenizer.model").is_file(),
-        "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
     }
+    if not ignore_tokenizer_files:
+        files.update({
+            "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file() or
+                                                (checkpoint_dir / "tokenizer.model").is_file(),
+            "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
+        })
+
     if checkpoint_dir.is_dir():
         if all(files.values()):
             # we're good
@@ -135,14 +138,19 @@ def check_valid_checkpoint_dir(
     else:
         extra = ""
 
-    if raise_error:
-        raise FileNotFoundError(
+    if verbose:
+        error_message = (
             f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
+            "\nFind download instructions at https://github.com/Lightning-AI/litgpt/blob/main/tutorials\n"
+            f"{extra}\nSee all download options by running:\n litgpt download"
         )
+        print(error_message, file=sys.stderr)
+
+    if raise_error:
+        raise FileNotFoundError(f"checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}.")
     else:
         raise SystemExit(1)
-
-
+    
 class SavingProxyForStorage:
     def __init__(self, obj, saver, protocol_version=5):
         self.protocol_version = protocol_version
@@ -431,7 +439,14 @@ def load_checkpoint(
             state_dict_positional = add_prefix_to_dict_keys(
                 state_dict_positional, "positional_encoding_mlp."
             )
+            wte_dict = lazy_load(checkpoint_path.parent / "wte_weights.pth")
+            wte_dict = add_prefix_to_dict_keys(wte_dict, "transformer.wte.")
+            # lm_dict = lazy_load(checkpoint_path.parent / "lm_head_weights.pth")
+            # lm_dict = add_prefix_to_dict_keys(lm_dict, "lm_head.")
+            print(state_dict.keys())
             state_dict.update(state_dict_positional)
+            state_dict.update(wte_dict)
+            # state_dict.update(lm_dict)
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
         model.float()
@@ -713,7 +728,7 @@ def add_prefix_to_dict_keys(dict, prefix):
     return {f"{prefix}{key}": value for key, value in dict.items()}
 
 
-def resize_model_vocabulary_size(model, number_of_new_tokens):
+def resize_model_vocabulary_size(model, new_vocabulary_size):
     """
     Resize the vocabulary size of a model.
 
@@ -721,7 +736,6 @@ def resize_model_vocabulary_size(model, number_of_new_tokens):
         model (nn.Module): The model to resize.
         new_vocabulary_size (int): The new vocabulary size.
     """
-    new_vocabulary_size = model.config.padded_vocab_size + number_of_new_tokens
     old_vocab_size = model.config.padded_vocab_size
     embedding_dim = model.config.n_embd
     old_embeddings = model.get_embeddings()
