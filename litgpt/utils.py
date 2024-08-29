@@ -439,18 +439,10 @@ def load_checkpoint(
             state_dict_positional = add_prefix_to_dict_keys(
                 state_dict_positional, "positional_encoding_mlp."
             )
-            wte_dict = lazy_load(checkpoint_path.parent / "wte_weights.pth")
-            wte_dict = add_prefix_to_dict_keys(wte_dict, "transformer.wte.")
-            # lm_dict = lazy_load(checkpoint_path.parent / "lm_head_weights.pth")
-            # lm_dict = add_prefix_to_dict_keys(lm_dict, "lm_head.")
-            print(state_dict.keys())
-            state_dict.update(state_dict_positional)
-            state_dict.update(wte_dict)
-            # state_dict.update(lm_dict)
+            state_dict.update(state_dict_positional) 
         state_dict = state_dict.get("model", state_dict)
-        model.load_state_dict(state_dict, strict=strict)
+        model.load_state_dict(state_dict, strict=strict) 
         model.float()
-
 
 def flops_per_param(
     max_seq_length: int, n_layer: int, n_embd: int, n_params: int
