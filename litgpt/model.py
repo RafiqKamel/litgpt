@@ -113,7 +113,7 @@ class GPT(nn.Module):
             )
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros_like(x)
+            pos_encodings = torch.zeros((x.shape[0], x.shape[1]-1, x.shape[2])).to(self.device)
         # shifting the pos_encodings to the right by 1 to account for the added <AMR> token
         x[:, 1 : pos_encodings.shape[1] + 1, :] += pos_encodings
         if self.config.scale_embeddings:
@@ -185,7 +185,7 @@ class Block(nn.Module):
             )
 
         self.norm_1 = config.norm_class(config.n_embd, eps=config.norm_eps)
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention(config, block_idx)
         self.norm_2 = (
             None
             if config.shared_attention_norm
