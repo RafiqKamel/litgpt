@@ -119,11 +119,12 @@ class SFTDataset(Dataset):
             eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
             self.data[idx]["eig_vec"] = eig_vec     
         
-        if torch.equal(encoded_prompt_and_response[:3], torch.tensor([2, 2, 256000])):
-            encoded_prompt_and_response[:3] = torch.tensor([256000, 2, 2])
+        if torch.equal(encoded_prompt_and_response[:2], torch.tensor([2, 256000])):
+            encoded_prompt_and_response[:2] = torch.tensor([256000, 2])
         else:
-            print(list(encoded_prompt_and_response)[:3])
+            print("mistake",list(encoded_prompt_and_response)[:3])
             print(encoded_prompt_and_response)
+        print("sizes", encoded_prompt_and_response.shape, encoded_prompt.shape, eig_vec.shape)  
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
