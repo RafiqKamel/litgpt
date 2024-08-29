@@ -645,7 +645,8 @@ class GPT(BaseModel):
             pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros_like(x)   
+            pos_encodings = torch.zeros((x.shape[0], x.shape[1]-1, x.shape[2])).to(self.device)  
+        print("before adding", x.shape, pos_encodings.shape, x[:, 1:pos_encodings.shape[1]+1, :].shape)    
         #shifting the pos_encodings to the right by 1 to account for the added <AMR> token       
         x[:, 1:pos_encodings.shape[1]+1, :] += pos_encodings
         if self.config.scale_embeddings:
