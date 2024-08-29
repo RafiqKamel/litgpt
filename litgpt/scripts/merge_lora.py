@@ -16,7 +16,10 @@ from litgpt.utils import check_valid_checkpoint_dir, extend_checkpoint_dir, load
 def merge_lora(
     checkpoint_dir: Path,
     pretrained_checkpoint_dir: Optional[Path] = None,
-    precision: Optional[str] = None
+    precision: Optional[str] = None,
+    load_resized_weights: Optional[bool] = False,
+    new_vocab_size: Optional[int] = None,
+    
 ) -> None:
     """Merges the LoRA weights with the base model.
 
@@ -35,6 +38,8 @@ def merge_lora(
         precision: Optional precision setting to instantiate the model weights in. By default, this will
             automatically be inferred from the metadata in the given ``checkpoint_dir`` directory.
     """
+    if load_resized_weights and new_vocab_size is None:
+        raise ValueError("new_vocab_size must be provided when load_resized_weights is True")
     checkpoint_dir = extend_checkpoint_dir(checkpoint_dir)
     if pretrained_checkpoint_dir is not None:
         pretrained_checkpoint_dir = extend_checkpoint_dir(pretrained_checkpoint_dir)
@@ -58,6 +63,7 @@ def merge_lora(
     config = Config.from_file(checkpoint_dir / "model_config.yaml", **lora_params)
     hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
     eig_vec_size = hp_config["train"]["max_seq_length"] * 2
+    config.padded_vocab_size = new_vocab_size if new_vocab_size is not None else config.padded_vocab_size
 
     with fabric.init_module(), torch.device("meta"):
         model = GPT(config, eig_vec_size=eig_vec_size)
@@ -69,6 +75,14 @@ def merge_lora(
     pretrained_checkpoint = torch.load(str(pretrained_checkpoint_dir / "lit_model.pth"), mmap=True)
     lora_checkpoint = torch.load(str(lora_path), mmap=True)
     lora_checkpoint = lora_checkpoint.get("model", lora_checkpoint)
+    if load_resized_weights:
+        resized_lm_head = torch.load(str(checkpoint_dir / "resized_lm_head.pth"), mmap=True)
+        resized_lm_head = add_prefix_to_dict_keys(resized_lm_head, "lm_head.")
+        resized_transformer_wte = torch.load(str(checkpoint_dir / "resized_transformer_wte.pth"), mmap=True)
+        resized_transformer_wte = add_prefix_to_dict_keys(resized_transformer_wte, "transformer.wte.")
+        pretrained_checkpoint.update(resized_lm_head)
+        pretrained_checkpoint.update(resized_transformer_wte)   
+        
     positional_encoding_weights = torch.load(str(checkpoint_dir / "pos_encoding_weights.pth"), mmap=True)
     positional_encoding_weights = add_prefix_to_dict_keys(positional_encoding_weights, "positional_encoding_mlp.")
     
@@ -86,7 +100,6 @@ def merge_lora(
     state_dict = {k.replace("linear.", ""): v for k, v in model.state_dict().items() if not lora_filter(k, v)}
     save_path = checkpoint_dir / "lit_model.pth"
     torch.save(state_dict, save_path)
-
     fabric.print(f"Saved merged weights to {str(checkpoint_dir / 'lit_model.pth')!r}")
 
 
