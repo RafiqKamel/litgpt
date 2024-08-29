@@ -255,7 +255,7 @@ def main(
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
 
-    resize_model_vocabulary_size(model, len(new_tokens_amr))
+    resize_model_vocabulary_size(model, tokenizer.processor.get_vocab_size())
 
     train_time = time.perf_counter()
     fit(
@@ -303,6 +303,7 @@ def main(
             model.positional_encoding_mlp.state_dict(),
             save_path.parent / "pos_encoding_weights.pth",
         )
+        torch.save(model.transofrmer.wte.state_dict(), save_path.parent / "wte_weights.pth")
         merge_lora(checkpoint_dir=save_path.parent)
         # save weight for postional encoding layer
         # Save the weights for the positional encoding layer
@@ -505,12 +506,12 @@ def generate_example(
     eig_vec = process_eigenvectors_subtokens(
         eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer
     )
-    eig_vec = torch.from_numpy(np.expand_dims(eig_vec, axis=0))
+    eig_vec = torch.from_numpy(np.reshape(eig_vec, (1,eig_vec.shape[0], eig_vec.shape[1]))).to(model.device)
     encoded = tokenizer.encode(prompt, device=fabric.device)
-    if torch.equal(encoded[:3], torch.tensor([2, 2, 256000]).to(model.device)):
-        encoded[:3] = torch.tensor([256000, 2, 2]).to(model.device)
+    if torch.equal(encoded[:2], torch.tensor([2, 256000]).to(model.device)):
+        encoded[:2] = torch.tensor([256000, 2]).to(model.device)
     else:
-        print("unexpected input IDs in generate function", list(encoded)[:3], encoded)
+        print("unexpected input IDs in generate function", list(encoded)[:2], encoded)
     model.eval()
 
     with fabric.init_tensor():
