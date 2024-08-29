@@ -22,7 +22,7 @@ import numpy as np
 from litgpt.args import EvalArgs, TrainArgs
 from litgpt.data import Alpaca, DataModule
 from litgpt.generate.base import generate
-from litgpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable
+from litgpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable, set_new_weights_trainable
 from litgpt.prompts import save_prompt_style
 from litgpt.scripts.merge_lora import merge_lora
 from litgpt.utils import recreate_graph
@@ -232,6 +232,7 @@ def main(
     with fabric.init_module(empty_init=(devices > 1)):
         model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
+    
 
     fabric.print(
         f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
@@ -254,9 +255,12 @@ def main(
 
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
-
+    old_vocab_size = model.transformer.wte.weight.size(0)
+    print("old vocab size", old_vocab_size)
     resize_model_vocabulary_size(model, tokenizer.processor.get_vocab_size())
-
+    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size, layer=model.transformer.wte, layer_name="transformer.wte")
+    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1  - old_vocab_size, layer=model.lm_head.linear, layer_name="lm_head.linear")
+    print("model size is (right after resizing): ", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
     train_time = time.perf_counter()
     fit(
         fabric,
@@ -299,12 +303,14 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
+        print("model size is (in main)", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
         torch.save(
             model.positional_encoding_mlp.state_dict(),
             save_path.parent / "pos_encoding_weights.pth",
         )
-        torch.save(model.transofrmer.wte.state_dict(), save_path.parent / "wte_weights.pth")
-        merge_lora(checkpoint_dir=save_path.parent)
+        torch.save(model.transformer.wte.state_dict(), save_path.parent / "resized_transformer_wte.pth")
+        torch.save(model.lm_head.linear.state_dict(), save_path.parent / "resized_lm_head.pth")
+        merge_lora(checkpoint_dir=save_path.parent, load_resized_weights=True, new_vocab_size = tokenizer.processor.get_vocab_size())
         # save weight for postional encoding layer
         # Save the weights for the positional encoding layer
 

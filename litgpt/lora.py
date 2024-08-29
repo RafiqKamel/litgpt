@@ -524,6 +524,38 @@ class LoRAQKVLinear(LoRALinear):
         return pretrained + lora
 
 
+def set_new_weights_trainable(layer, num_new_weights: int, layer_name: str) -> None:
+    """
+    Sets the last `num_new_weights` of the specified layer as trainable.
+    
+    Parameters:
+    - layer (nn.Module): The layer where the weights have been added.
+    - num_new_weights (int): The number of new weights added at the end of the layer's parameters.
+    - layer_name (str): The name of the layer.
+    
+    Returns:
+    None
+    """
+    changed_weights = False
+    changed_biases = False
+    # Check if the layer has weights (e.g., Linear or Conv2d layer)
+    if hasattr(layer, 'weight') and layer.weight is not None:
+        # Set the last `num_new_weights` as trainable
+        with torch.no_grad():
+            layer.weight[-num_new_weights:].requires_grad = True
+        changed_weights = True
+    # Check if the layer has bias (optional, depending on whether bias exists)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        # Optionally, set the last `num_new_weights` bias terms as trainable (if needed)
+        with torch.no_grad():
+            layer.bias[-num_new_weights:].requires_grad = True
+        changed_biases = True
+    # Print a message if the weights or biases have been changed
+    if changed_weights:
+        print(f"Set the last {num_new_weights} weights of the {layer_name} layer as trainable.")
+    if changed_biases:
+        print(f"Set the last {num_new_weights} biases of the {layer_name} layer as trainable.")    
+
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
     """Freeze all modules except LoRA's and depending on 'bias' value unfreezes bias weights.
 
@@ -538,6 +570,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
         NotImplementedError: if `bias` not in ["none", "lora_only", "all"]
     """
     # freeze all layers except LoRA's
+    
     for n, p in model.named_parameters():
         if "lora_" not in n and "positional" not in n:
             p.requires_grad = False
