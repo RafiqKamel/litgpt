@@ -109,7 +109,7 @@ class GPT(nn.Module):
         if eig_vecs is not None:
             eig_vecs = eig_vecs.to(self.device)
             pos_encodings = self.positional_encoding_mlp(
-                eig_vecs.to(dtype=torch.float32)
+                eig_vecs.to(dtype=self.positional_encoding_mlp.fc1.weight.dtype)
             )
         else:
             print("eigen vectors passed is None")
