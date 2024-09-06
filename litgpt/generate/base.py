@@ -133,18 +133,19 @@ def generate_fn(
     input_pos = torch.arange(0, prompt_size, device=device, dtype=torch.int64)
     for current_idx in range(max_returned_tokens - prompt_size):
 
-        # Generate the token
-        token = next_token(
+        # Generate the token  
+        new_token = next_token(
             model= model,
-            eig_vec=None,
-            input_pos=input_pos,
-            x=token.view(1, -1),
+            eig_vec=eig_vec,
+            input_pos=None,
+            x=token.view(1, -1).to(torch.int64),
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
         )
-        tokens.append(token)
-        int_token = token.item()
+        token = torch.cat([token, new_token], dim=0)
+        tokens.append(new_token)
+        int_token = token[-1].item()
 
         # Check for stop sequences
         # For each stop sequence, we keep a running total of how many are matched in stop_progress.
