@@ -58,7 +58,12 @@ class LLM(torch.nn.Module):
         self.model = model
         self.preprocessor = preprocessor
         self.devices = devices
-        self.prompt_style = prompt_style
+        prompt_style = "amr2text"
+        self.prompt_style = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
+        )
         self.config = config
         self.checkpoint_dir = checkpoint_dir
         self.fabric = fabric
