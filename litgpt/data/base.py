@@ -102,6 +102,8 @@ class SFTDataset(Dataset):
             encoded_prompt_and_response = encoded_prompt_and_response[
                 : self.max_seq_length
             ]
+        if self.max_seq_length < len(encoded_prompt_and_response):
+            print("Warning: Sequence length exceeds max_seq_length", len(encoded_prompt_and_response), self.max_seq_length)    
 
         # The labels are the full prompt with response, but with the prompt masked out
         labels = encoded_prompt_and_response.clone()
