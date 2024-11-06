@@ -431,6 +431,7 @@ def fit(
                 f" val: {val_loss} |"
                 f" iter time: {metrics['iter_time'] * 1000:.2f} ms"
                 f"{' (step)' if not is_accumulating else ''}"
+                f" | learning rate: {metrics['learning_rate']:.2e}"
             )
             fabric.log_dict(metrics, step=iter_num)
 
