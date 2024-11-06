@@ -7,6 +7,7 @@ import os
 import pickle
 import re
 import shutil
+import unicodedata
 import sys
 from dataclasses import asdict, is_dataclass
 from io import BytesIO
@@ -673,6 +674,10 @@ def extend_checkpoint_dir(checkpoint_dir: Path) -> Path:
 
 
 def recreate_graph(edge_list_str: str):
+    if edge_list_str == "":
+        graph = nx.Graph()
+        graph.add_node(0)
+        return graph
     # Split the string into lines
     edge_list_lines = edge_list_str.strip().split("\n")
 
@@ -782,23 +787,38 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
 
     index_map = {}
     subtoken_index = 0
-
+    
     for i, token in enumerate(tokens):
         subtokens_for_token = []
         token_length = 0
+        current_subtoken = ""
 
-        while token_length < len(token):
+        while token_length < len(strip_string(token)):
             subtokens_for_token.append(subtoken_index)
-            token_length += len(subtokens[subtoken_index].replace(" ", ""))
+            try:
+                token_length += len(strip_string(subtokens[subtoken_index]))
+                current_subtoken += subtokens[subtoken_index]    
+            except IndexError:
+                subtoken_map = {i: subtoken for i, subtoken in enumerate(subtokens)}
+                token_map = {i: token for i, token in enumerate(tokens)}
+                raise ValueError(f"\n sentence: {sentence} \n subtokens: {subtoken_map}\n token: {token} \n subtoken_index: {subtoken_index}  \n tokens: {token_map}  \n subtokens for token {subtokens_for_token} \n index map {index_map}"  )
             subtoken_index += 1
-
+        if strip_string(token) != strip_string(current_subtoken):
+            print(f"MISTAKE: Token: ({token})  Subtokens: ({subtokens_for_token}) Subtoken: ({current_subtoken}) subtoken_index: {subtoken_index}")
         index_map[i] = subtokens_for_token
 
     return index_map
 
 
+def strip_string(string):
+    string = unicodedata.normalize("NFKD", string)
+    return string.replace(" ","").replace('"',"")
+
 def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
-    indexing_map = create_indexing_map(sentence, tokenizer)
+    if len(eigvecs) == len(tokenizer.encode(sentence)):
+        indexing_map = {i: [i] for i in range(len(eigvecs))}
+    else:
+         indexing_map = create_indexing_map(sentence, tokenizer)
     subtoken_eigvecs = []
     for i, eigvec in enumerate(eigvecs):
         subtoken_indices = indexing_map[i]
@@ -812,6 +832,13 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
             )
 
     return np.array(subtoken_eigvecs)
+
+def create_edge_list_sequence(n_tokens):
+    edge_list = ""
+    for i in range(n_tokens-1):
+        edge_list += f"{i} {i+1}\n"
+    return edge_list    
+
 
 
 def check_file_size_on_cpu_and_warn(checkpoint_path, device, size_limit=4_509_715_660):
