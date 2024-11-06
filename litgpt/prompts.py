@@ -339,7 +339,9 @@ class Gemma(PromptStyle):
 class AMR2Text(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"<AMR>{prompt}<text>"
-
+class Text2AMR(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<text>{prompt}<AMR>"
 
 class H2Oai(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
@@ -372,6 +374,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "tinyllama": TinyLlama,
     "gemma": Gemma,
     "amr2text": AMR2Text,
+    "text2amr": Text2AMR,
     "h2oai": H2Oai,
     "llama3": Llama3,
 }
