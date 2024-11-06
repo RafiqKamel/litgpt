@@ -183,6 +183,7 @@ class LoRALinear(LoRALayer):
             @ self.lora_B.transpose(0, 1)
         ) * self.scaling
         return pretrained + lora
+
     def resize_output(self, new_out_features: int):
         """
         Resizes the output features of the linear layer and adjusts the LoRA matrices accordingly.
@@ -192,10 +193,16 @@ class LoRALinear(LoRALayer):
         """
         # Resize the pretrained weight matrix
         current_weight = self.linear.weight.data
-        new_weight = torch.empty((new_out_features, current_weight.size(1)), dtype=current_weight.dtype, device=current_weight.device)
+        new_weight = torch.empty(
+            (new_out_features, current_weight.size(1)),
+            dtype=current_weight.dtype,
+            device=current_weight.device,
+        )
         if new_out_features > current_weight.size(0):
-            new_weight[:current_weight.size(0)] = current_weight
-            nn.init.kaiming_uniform_(new_weight[current_weight.size(0):], a=math.sqrt(5))
+            new_weight[: current_weight.size(0)] = current_weight
+            nn.init.kaiming_uniform_(
+                new_weight[current_weight.size(0) :], a=math.sqrt(5)
+            )
         else:
             new_weight = current_weight[:new_out_features]
         self.linear.weight = nn.Parameter(new_weight)
@@ -203,12 +210,14 @@ class LoRALinear(LoRALayer):
         # Resize the bias if exists
         if self.linear.bias is not None:
             current_bias = self.linear.bias.data
-            new_bias = torch.empty(new_out_features, dtype=current_bias.dtype, device=current_bias.device)
+            new_bias = torch.empty(
+                new_out_features, dtype=current_bias.dtype, device=current_bias.device
+            )
             if new_out_features > current_bias.size(0):
-                new_bias[:current_bias.size(0)] = current_bias
+                new_bias[: current_bias.size(0)] = current_bias
                 fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.linear.weight)
                 bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                nn.init.uniform_(new_bias[current_bias.size(0):], -bound, bound)
+                nn.init.uniform_(new_bias[current_bias.size(0) :], -bound, bound)
             else:
                 new_bias = current_bias[:new_out_features]
             self.linear.bias = nn.Parameter(new_bias)
@@ -216,10 +225,14 @@ class LoRALinear(LoRALayer):
         # Resize LoRA B matrix if LoRA is being used
         if self.r > 0:
             current_lora_B = self.lora_B.data
-            new_lora_B = torch.empty((new_out_features, self.r), dtype=current_lora_B.dtype, device=current_lora_B.device)
+            new_lora_B = torch.empty(
+                (new_out_features, self.r),
+                dtype=current_lora_B.dtype,
+                device=current_lora_B.device,
+            )
             if new_out_features > current_lora_B.size(0):
-                new_lora_B[:current_lora_B.size(0)] = current_lora_B
-                nn.init.zeros_(new_lora_B[current_lora_B.size(0):])
+                new_lora_B[: current_lora_B.size(0)] = current_lora_B
+                nn.init.zeros_(new_lora_B[current_lora_B.size(0) :])
             else:
                 new_lora_B = current_lora_B[:new_out_features]
             self.lora_B = nn.Parameter(new_lora_B)
@@ -229,7 +242,6 @@ class LoRALinear(LoRALayer):
 
         # Reset merged flag since weights need to be recomputed
         self.merged = False
-
 
 
 class LoRAQKVLinear(LoRALinear):
@@ -418,10 +430,15 @@ class LoRAQKVLinear(LoRALinear):
         # Then x has embeddings_size of 256 (2 * 128 as enable_lora only for query and value, not keys) and expected
         # embeddings_size is 384 (self.linear.out_features), so that means that we need to pad from 256 to 384 with zeros, but
         # only for key updates (this is where self.lora_ind comes in handy)
+
         result = x.new_zeros(*x.shape[:-1], self.linear.out_features)  # (64, 64, 384)
-        return result.index_copy_(
-            dim=-1, index=self.lora_ind, source=x
-        )  # (64, 64, 384)
+        if result.device.type == "mps":
+            result[..., self.lora_ind] = x
+            return result
+        else:
+            return result.index_copy_(
+                dim=-1, index=self.lora_ind, source=x
+            )  # (64, 64, 384)
 
     def conv1d(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         """An extension of the `torch.nn.functional.conv1d` function with a logic specific to grouped queries.
@@ -527,34 +544,39 @@ class LoRAQKVLinear(LoRALinear):
 def set_new_weights_trainable(layer, num_new_weights: int, layer_name: str) -> None:
     """
     Sets the last `num_new_weights` of the specified layer as trainable.
-    
+
     Parameters:
     - layer (nn.Module): The layer where the weights have been added.
     - num_new_weights (int): The number of new weights added at the end of the layer's parameters.
     - layer_name (str): The name of the layer.
-    
+
     Returns:
     None
     """
     changed_weights = False
     changed_biases = False
     # Check if the layer has weights (e.g., Linear or Conv2d layer)
-    if hasattr(layer, 'weight') and layer.weight is not None:
+    if hasattr(layer, "weight") and layer.weight is not None:
         # Set the last `num_new_weights` as trainable
         with torch.no_grad():
             layer.weight[-num_new_weights:].requires_grad = True
         changed_weights = True
     # Check if the layer has bias (optional, depending on whether bias exists)
-    if hasattr(layer, 'bias') and layer.bias is not None:
+    if hasattr(layer, "bias") and layer.bias is not None:
         # Optionally, set the last `num_new_weights` bias terms as trainable (if needed)
         with torch.no_grad():
             layer.bias[-num_new_weights:].requires_grad = True
         changed_biases = True
     # Print a message if the weights or biases have been changed
     if changed_weights:
-        print(f"Set the last {num_new_weights} weights of the {layer_name} layer as trainable.")
+        print(
+            f"Set the last {num_new_weights} weights of the {layer_name} layer as trainable."
+        )
     if changed_biases:
-        print(f"Set the last {num_new_weights} biases of the {layer_name} layer as trainable.")    
+        print(
+            f"Set the last {num_new_weights} biases of the {layer_name} layer as trainable."
+        )
+
 
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
     """Freeze all modules except LoRA's and depending on 'bias' value unfreezes bias weights.
@@ -570,7 +592,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
         NotImplementedError: if `bias` not in ["none", "lora_only", "all"]
     """
     # freeze all layers except LoRA's
-    
+
     for n, p in model.named_parameters():
         if "lora_" not in n and "positional" not in n:
             p.requires_grad = False
@@ -639,15 +661,19 @@ class GPT(BaseModel):
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
-                h=nn.ModuleList(Block(config, block_idx) for block_idx in range(config.n_layer)),
+                h=nn.ModuleList(
+                    Block(config, block_idx) for block_idx in range(config.n_layer)
+                ),
                 ln_f=config.norm_class(config.n_embd, eps=config.norm_eps),
             )
         )
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
         input_dim = eig_vec_size + sinousidial_encodings_dim
-        self.positional_encoding_mlp = PositionalEncodingMLP(input_dim=input_dim,output_dim=config.n_embd)
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.positional_encoding_mlp = PositionalEncodingMLP(
+            input_dim=input_dim, output_dim=config.n_embd
+        )
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def forward(
         self,
@@ -670,17 +696,21 @@ class GPT(BaseModel):
         else:
             cos = self.cos[:T]
             sin = self.sin[:T]
-            mask = None  
-        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
+            mask = None
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         # Process eigenvectors through the MLP to get positional encodings
         if eig_vecs is not None:
             eig_vecs = eig_vecs.to(self.device)
-            pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
+            pos_encodings = self.positional_encoding_mlp(
+                eig_vecs.to(dtype=torch.float32)
+            )
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros((x.shape[0], x.shape[1]-1, x.shape[2])).to(self.device)    
-        #shifting the pos_encodings to the right by 1 to account for the added <AMR> token       
-        x[:, 1:pos_encodings.shape[1]+1, :] += pos_encodings
+            pos_encodings = torch.zeros((x.shape[0], x.shape[1] - 1, x.shape[2])).to(
+                self.device
+            )
+        # shifting the pos_encodings to the right by 1 to account for the added <AMR> token
+        x[:, 1 : pos_encodings.shape[1] + 1, :] += pos_encodings
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
@@ -691,7 +721,10 @@ class GPT(BaseModel):
             return [self.lm_head(x_i) for x_i in x.split(lm_head_chunk_size, dim=1)]
         x = self.lm_head(x)  # (b, t, vocab_size)
         if self.config.final_logit_softcapping is not None:
-            x = torch.tanh(x / self.config.final_logit_softcapping) * self.config.final_logit_softcapping
+            x = (
+                torch.tanh(x / self.config.final_logit_softcapping)
+                * self.config.final_logit_softcapping
+            )
         return x
 
     @classmethod
@@ -727,12 +760,20 @@ class Block(BaseBlock):
         self.norm_1 = config.norm_class(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config, block_idx)
         self.post_attention_norm = (
-            config.norm_class(config.n_embd, eps=config.norm_eps) if config.post_attention_norm else nn.Identity()
+            config.norm_class(config.n_embd, eps=config.norm_eps)
+            if config.post_attention_norm
+            else nn.Identity()
         )
-        self.norm_2 = None if config.shared_attention_norm else config.norm_class(config.n_embd, eps=config.norm_eps)
+        self.norm_2 = (
+            None
+            if config.shared_attention_norm
+            else config.norm_class(config.n_embd, eps=config.norm_eps)
+        )
         self.mlp = config.mlp_class(config)
         self.post_mlp_norm = (
-            config.norm_class(config.n_embd, eps=config.norm_eps) if config.post_mlp_norm else nn.Identity()
+            config.norm_class(config.n_embd, eps=config.norm_eps)
+            if config.post_mlp_norm
+            else nn.Identity()
         )
 
         self.config = config
@@ -771,8 +812,8 @@ class CausalSelfAttention(BaseCausalSelfAttention):
         # disabled by default
         self.kv_cache: Optional[KVCache] = None
         self.apply_sliding_window_attention = (
-            config.sliding_window_size is not None and
-            block_idx % config.sliding_window_layer_placing == 0
+            config.sliding_window_size is not None
+            and block_idx % config.sliding_window_layer_placing == 0
         )
 
         self.config = config

@@ -56,7 +56,8 @@ class GPT(nn.Module):
         """
         if value > self.config.block_size:
             raise ValueError(
-                f"Cannot attend to {value}, block size is only {self.config.block_size}"
+                f"Cannot attend to {value}, block size is only {self.config.block_size}."
+                " This is likely because the input text exceeds the supported context length of this model."
             )
         self._max_seq_length = value
         if not hasattr(self, "cos"):
@@ -95,11 +96,15 @@ class GPT(nn.Module):
                 f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
             )
         if input_pos is not None:  # use the kv cache
-            cos = self.cos.index_select(0, input_pos)
-            sin = self.sin.index_select(0, input_pos)
+            cos = batched_index_select(self.cos, 0, input_pos)
+            sin = batched_index_select(self.sin, 0, input_pos)
             if self.mask_cache is None:
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
-            mask = self.mask_cache.index_select(2, input_pos)
+            mask = batched_index_select(self.mask_cache, 2, input_pos)
+            if mask.dim() > 4:
+                # the mask cache has a batch dim of 1 in addition to the one
+                # we get if input_pos has a batch dimension
+                mask = mask.squeeze(1)
         else:
             cos = self.cos[:T]
             sin = self.sin[:T]
@@ -113,7 +118,9 @@ class GPT(nn.Module):
             )
         else:
             print("eigen vectors passed is None")
-            pos_encodings = torch.zeros((x.shape[0], x.shape[1]-1, x.shape[2])).to(self.device)
+            pos_encodings = torch.zeros((x.shape[0], x.shape[1] - 1, x.shape[2])).to(
+                self.device
+            )
         # shifting the pos_encodings to the right by 1 to account for the added <AMR> token
         x[:, 1 : pos_encodings.shape[1] + 1, :] += pos_encodings
         if self.config.scale_embeddings:
@@ -136,12 +143,56 @@ class GPT(nn.Module):
     def rope_cache(
         self, device: Optional[torch.device] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        if self.config.rope_adjustments is None:
+            extra_config = None
+
+        else:
+            adjusted_params_required = [
+                "factor",
+                "low_freq_factor",
+                "high_freq_factor",
+                "original_max_seq_len",
+            ]
+            params_present = [
+                param in self.config.rope_adjustments
+                for param in adjusted_params_required
+            ]
+            num_params_present = sum(params_present)
+
+            if num_params_present == 0:
+                extra_config = None  # uses standard RoPE
+            elif num_params_present == 4:
+                # These parameters should always be used together so that we don't interfere with standard rope
+                extra_config = {
+                    "original_max_seq_len": self.config.rope_adjustments[
+                        "original_max_seq_len"
+                    ],
+                    "factor": self.config.rope_adjustments["factor"],
+                    "low_freq_factor": self.config.rope_adjustments["low_freq_factor"],
+                    "high_freq_factor": self.config.rope_adjustments[
+                        "high_freq_factor"
+                    ],
+                }
+            else:
+                # Some but not all parameters are specified; raise an error
+                missing_params = [
+                    param
+                    for param, present in zip(adjusted_params_required, params_present)
+                    if not present
+                ]
+                raise ValueError(
+                    f"The following adjusted RoPE parameters are missing in rope_adjustments: {', '.join(missing_params)}. "
+                    "All adjusted RoPE parameters must be specified together."
+                )
+
         return build_rope_cache(
             seq_len=self.max_seq_length,
             n_elem=self.config.rope_n_elem,
             device=device,
             condense_ratio=self.config.rope_condense_ratio,
             base=self.config.rope_base,
+            extra_config=extra_config,
         )
 
     def set_kv_cache(
@@ -161,7 +212,11 @@ class GPT(nn.Module):
         # initialize the kv cache for all blocks
         for block in self.transformer.h:
             block.attn.kv_cache = block.attn.build_kv_cache(
-                batch_size, max_seq_length, rope_cache_length, device, dtype
+                batch_size,
+                max_seq_length,
+                rope_cache_length,
+                device,
+                dtype,
             )
 
         if self.mask_cache is None or self.mask_cache.size(3) != max_seq_length:
@@ -491,17 +546,42 @@ def build_rope_cache(
     device: Optional[torch.device] = None,
     base: int = 10000,
     condense_ratio: int = 1,
+    extra_config: Optional[dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Enhanced Transformer with Rotary Position Embedding.
-
-    Derived from: https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/labml_nn/
-    transformers/rope/__init__.py. MIT License:
-    https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/license.
     """
-    # $\Theta = {\theta_i = 10000^{\frac{2(i-1)}{d}}, i \in [1, 2, ..., \frac{d}{2}]}$
+    Enhanced Transformer with Rotary Position Embedding.
+
+    Args:
+        seq_len (int): Sequence length.
+        n_elem (int): Number of elements (head dimension).
+        device (torch.device, optional): Device for tensor allocations.
+        base (int, optional): Base for computing inverse frequencies.
+        condense_ratio (int, optional): Ratio to condense the position indices.
+        extra_config (dict, optional): Configuration parameters for frequency adjustments (used by Llama 3.1 and 3.2)
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Cosine and sine caches for RoPE.
+    """
+
+    # Compute the inverse frequencies theta
     theta = 1.0 / (base ** (torch.arange(0, n_elem, 2, device=device).float() / n_elem))
 
-    # Create position indexes `[0, 1, ..., seq_len - 1]`
+    if extra_config is not None:
+        orig_context_len = extra_config["original_max_seq_len"]
+        factor = extra_config["factor"]
+        low_freq_factor = extra_config["low_freq_factor"]
+        high_freq_factor = extra_config["high_freq_factor"]
+
+        wavelen = 2 * torch.pi / theta
+        ratio = orig_context_len / wavelen
+        smooth_factor = (ratio - low_freq_factor) / (high_freq_factor - low_freq_factor)
+        smooth_factor = torch.clamp(smooth_factor, min=0.0, max=1.0)
+
+        # Compute adjusted_theta without masked indexing
+        adjusted_theta = (1 - smooth_factor) * (theta / factor) + smooth_factor * theta
+        theta = adjusted_theta
+
+    # Create position indices `[0, 1, ..., seq_len - 1]`
     seq_idx = torch.arange(seq_len, device=device) / condense_ratio
 
     # Calculate the product of position index and $\theta_i$
@@ -510,11 +590,86 @@ def build_rope_cache(
     return torch.cos(idx_theta), torch.sin(idx_theta)
 
 
+def batched_index_select(t, dim, idx):
+    """index_select for batched index and unbatched t"""
+    if idx.dim() == 1:
+        return torch.index_select(t, dim, idx)
+
+    *batch_shape, idx_size = idx.shape
+    res = torch.index_select(t, dim, idx.reshape(-1))  # flat index
+    # split out single batch idx
+    res = res.view(*t.shape[:dim], -1, idx_size, *t.shape[dim + 1 :])
+    # move batch dim to front, this is np.rollaxis(res, dim, 0) for tensors
+    dims = [dim] + list(range(res.dim()))
+    del dims[dim + 1]
+    res = res.permute(dims)
+    # unflatten batch dims
+    res = res.view(*batch_shape, *res.shape[1:])
+    return res
+
+
+def batched_index_copy_(t, dim, idx, val):
+    """Index copy for batched t, idx, val"""
+
+    if t.device.type == "mps":
+        # Normalize negative dimensions
+        if dim < 0:
+            dim = t.dim() + dim
+        if idx.dim() == 1:
+            idx_shape = [1] * val.dim()
+            idx_shape[dim] = -1
+            idx_expanded = idx.view(*idx_shape)
+            idx_expanded = idx_expanded.expand_as(val)
+            t.scatter_(dim, idx_expanded, val)
+            return t
+
+        elif idx.dim() == 2:
+            assert dim != 0, "Cannot index the batch dimension"
+            batch_size = idx.size(0)
+            idx_size = idx.size(1)
+            assert batch_size == t.size(0) == val.size(0)
+
+            idx_shape = [batch_size] + [1] * (val.dim() - 1)
+            idx_shape[dim] = idx_size
+            idx_expanded = idx.view(*idx_shape)
+            idx_expanded = idx_expanded.expand_as(val)
+
+            t.scatter_(dim, idx_expanded, val)
+            return t
+        else:
+            raise NotImplementedError(f"idx.dim() == {idx.dim()} not supported")
+
+    else:
+        if idx.dim() == 1:
+            return t.index_copy_(dim, idx, val)
+
+        assert idx.dim() == 2, f"multiple batch dims not yet {idx.shape=}"
+        assert dim != 0, f"cannot index batch dim {dim=}"
+        batch_size, idx_size = idx.shape
+        assert batch_size == t.size(0)
+        assert batch_size == val.size(0)
+
+        # if we can view the batch and indexed dimensions together, we could
+        # do index trickery. This is, sadly, not the case for kvcache so we
+        # fall back to for loop
+        for i in range(batch_size):
+            unbatched_dim = dim if dim < 0 else dim - 1
+            t[i].index_copy_(unbatched_dim, idx[i], val[i])
+        return t
+
+
 def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     head_size = x.size(-1)
     x1 = x[..., : head_size // 2]  # (B, nh, T, hs/2)
     x2 = x[..., head_size // 2 :]  # (B, nh, T, hs/2)
     rotated = torch.cat((-x2, x1), dim=-1)  # (B, nh, T, hs)
+    if cos.dim() > 1:
+        # batch dimensions must align
+        # sin/cos are (B, T, hs) so we unsqeeze -3 for nh
+        # we count from back because all of apply_rope does
+        cos = cos.unsqueeze(-3)
+        sin = sin.unsqueeze(-3)
+
     roped = (x * cos) + (rotated * sin)
     return roped.to(dtype=x.dtype)
 
@@ -543,8 +698,8 @@ class KVCache(nn.Module):
         self.v = self.v.to(v.dtype)
         # update the cache
         n = k.size(0)
-        k = self.k[:n, ...].index_copy_(2, input_pos, k)
-        v = self.v[:n, ...].index_copy_(2, input_pos, v)
+        k = batched_index_copy_(self.k[:n, ...], -2, input_pos, k)
+        v = batched_index_copy_(self.v[:n, ...], -2, input_pos, v)
         return k, v
 
     def reset_parameters(self) -> None:

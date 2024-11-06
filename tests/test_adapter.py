@@ -155,6 +155,11 @@ def test_adapter_bitsandbytes(monkeypatch, tmp_path, fake_checkpoint_dir, alpaca
 
     monkeypatch.setattr(module, "load_checkpoint", Mock())
     train_mock = Mock()
+    train_mock.return_value = {
+        "raw_tokens": 1000,
+        "raw_tokens_plus_prompt_template": 1100,
+        "raw_tokens_plus_prompt_template_and_padding": 1200,
+    }
     monkeypatch.setattr(module, "fit", train_mock)
 
     stdout = StringIO()
@@ -182,6 +187,8 @@ def test_adapter_bitsandbytes(monkeypatch, tmp_path, fake_checkpoint_dir, alpaca
     assert dtype_to_name == {
         "torch.float16": {
             "transformer.wte.weight",
+            "transformer.wte.norm.weight",
+            "transformer.wte.norm.bias",
             "transformer.h.0.norm_1.weight",
             "transformer.h.0.norm_1.bias",
             "transformer.h.0.attn.gating_factor",

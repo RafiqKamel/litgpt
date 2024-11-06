@@ -22,7 +22,14 @@ import numpy as np
 from litgpt.args import EvalArgs, TrainArgs
 from litgpt.data import Alpaca, DataModule
 from litgpt.generate.base import generate
-from litgpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable, set_new_weights_trainable
+from litgpt.lora import (
+    GPT,
+    Block,
+    Config,
+    lora_filter,
+    mark_only_lora_as_trainable,
+    set_new_weights_trainable,
+)
 from litgpt.prompts import save_prompt_style
 from litgpt.scripts.merge_lora import merge_lora
 from litgpt.utils import recreate_graph
@@ -32,6 +39,7 @@ from litgpt.special_tokens import new_tokens_amr
 from litgpt.utils import (
     auto_download_checkpoint,
     check_nvlink_connectivity,
+    create_finetuning_performance_report,
     CycleIterator,
     check_valid_checkpoint_dir,
     choose_logger,
@@ -47,6 +55,7 @@ from litgpt.utils import (
     save_hyperparameters,
     resize_model_vocabulary_size,
     process_eigenvectors_subtokens,
+    select_sft_generate_example,
 )
 
 
@@ -232,7 +241,6 @@ def main(
     with fabric.init_module(empty_init=(devices > 1)):
         model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
-    
 
     fabric.print(
         f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
@@ -242,9 +250,20 @@ def main(
     )
 
     model = fabric.setup_module(model)
-
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
         optimizer = instantiate_bnb_optimizer(optimizer, model.parameters())
+
+        from bitsandbytes.nn import StableEmbedding
+
+        old_embedding = model.transformer.wte
+        model.transformer.wte = StableEmbedding(
+            old_embedding.num_embeddings, old_embedding.embedding_dim
+        )
+        with torch.no_grad():
+            model.transformer.wte.weight.copy_(old_embedding.weight)
+        model.transformer.wte = model.transformer.wte.to(
+            device=old_embedding.weight.device, dtype=old_embedding.weight.dtype
+        )
     else:
         optimizer = instantiate_torch_optimizer(optimizer, model.parameters())
 
@@ -258,11 +277,23 @@ def main(
     old_vocab_size = model.transformer.wte.weight.size(0)
     print("old vocab size", old_vocab_size)
     resize_model_vocabulary_size(model, tokenizer.processor.get_vocab_size())
-    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size, layer=model.transformer.wte, layer_name="transformer.wte")
-    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1  - old_vocab_size, layer=model.lm_head.linear, layer_name="lm_head.linear")
-    print("model size is (right after resizing): ", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
+    set_new_weights_trainable(
+        num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size,
+        layer=model.transformer.wte,
+        layer_name="transformer.wte",
+    )
+    set_new_weights_trainable(
+        num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size,
+        layer=model.lm_head.linear,
+        layer_name="lm_head.linear",
+    )
+    print(
+        "model size is (right after resizing): ",
+        model.transformer.wte.weight.size(),
+        model.lm_head.linear.weight.size(),
+    )
     train_time = time.perf_counter()
-    fit(
+    token_counts = fit(
         fabric,
         model,
         optimizer,
@@ -276,9 +307,12 @@ def main(
         eval,
         data,
     )
-    fabric.print(f"Training time: {(time.perf_counter()-train_time):.2f}s")
-    if fabric.device.type == "cuda":
-        fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
+
+    training_time = time.perf_counter() - train_time
+    output = create_finetuning_performance_report(
+        training_time, token_counts, fabric.device.type
+    )
+    fabric.print(output)
 
     # Final evaluation
     if eval.final_validation:
@@ -303,14 +337,27 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
-        print("model size is (in main)", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
+        print(
+            "model size is (in main)",
+            model.transformer.wte.weight.size(),
+            model.lm_head.linear.weight.size(),
+        )
         torch.save(
             model.positional_encoding_mlp.state_dict(),
             save_path.parent / "pos_encoding_weights.pth",
         )
-        torch.save(model.transformer.wte.state_dict(), save_path.parent / "resized_transformer_wte.pth")
-        torch.save(model.lm_head.linear.state_dict(), save_path.parent / "resized_lm_head.pth")
-        merge_lora(checkpoint_dir=save_path.parent, load_resized_weights=True, new_vocab_size = tokenizer.processor.get_vocab_size())
+        torch.save(
+            model.transformer.wte.state_dict(),
+            save_path.parent / "resized_transformer_wte.pth",
+        )
+        torch.save(
+            model.lm_head.linear.state_dict(), save_path.parent / "resized_lm_head.pth"
+        )
+        merge_lora(
+            checkpoint_dir=save_path.parent,
+            load_resized_weights=True,
+            new_vocab_size=tokenizer.processor.get_vocab_size(),
+        )
         # save weight for postional encoding layer
         # Save the weights for the positional encoding layer
 
@@ -328,7 +375,7 @@ def fit(
     train: TrainArgs,
     eval: EvalArgs,
     data: DataModule,
-) -> None:
+) -> dict:
     tokenizer = Tokenizer(checkpoint_dir)
     longest_seq_length, longest_seq_ix = get_longest_seq_length(
         ConcatDataset([train_dataloader.dataset, val_dataloader.dataset])
@@ -369,7 +416,17 @@ def fit(
     total_lengths = 0
     total_t0 = time.perf_counter()
 
-    while step_count < max_steps and train_iterator.epoch < train.epochs:
+    token_counts = {
+        "raw_tokens": torch.tensor(0, device=fabric.device, dtype=torch.long),
+        "raw_tokens_plus_prompt_template": torch.tensor(
+            0, device=fabric.device, dtype=torch.long
+        ),
+        "raw_tokens_plus_prompt_template_and_padding": torch.tensor(
+            0, device=fabric.device, dtype=torch.long
+        ),
+    }
+
+    while step_count < max_steps:
         iter_num += 1
         iter_t0 = time.perf_counter()
         batch = next(train_iterator)
@@ -378,6 +435,9 @@ def fit(
             batch["labels"],
             batch["eig_vec"],
         )
+        if train_iterator.epoch >= train.epochs:
+            break
+        input_ids, targets = batch["input_ids"], batch["labels"]
 
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
@@ -394,6 +454,12 @@ def fit(
             optimizer.zero_grad()
             scheduler.step()
             step_count += 1
+
+        token_counts["raw_tokens"] += batch["token_counts"]["raw"].sum().item()
+        token_counts["raw_tokens_plus_prompt_template"] += (
+            batch["token_counts"]["raw_plus_prompt_template"].sum().item()
+        )
+        token_counts["raw_tokens_plus_prompt_template_and_padding"] += input_ids.numel()
 
         total_lengths += input_ids.numel()
         if iter_num % train.log_interval == 0:
@@ -414,6 +480,9 @@ def fit(
                 "step": step_count,
                 "epoch": train_iterator.epoch,
                 "iter_time": t1 - iter_t0,
+                "tokens": token_counts["raw_tokens_plus_prompt_template"],
+                "total_tokens": token_counts["raw_tokens_plus_prompt_template"]
+                * fabric.world_size,
                 "tokens": iter_num * train.micro_batch_size * model.config.block_size,
                 "total_tokens": (
                     iter_num
@@ -458,6 +527,13 @@ def fit(
                 copy_config_files(checkpoint_dir, checkpoint_file.parent)
                 save_hyperparameters(setup, checkpoint_file.parent)
                 save_prompt_style(data.prompt_style, checkpoint_file.parent)
+
+    total_token_counts = {}
+    for key in token_counts:
+        total = fabric.all_reduce(token_counts[key], reduce_op="sum")
+        total_token_counts[key] = total.item()
+
+    return total_token_counts
 
 
 # FSDP has issues with `inference_mode`
@@ -512,7 +588,9 @@ def generate_example(
     eig_vec = process_eigenvectors_subtokens(
         eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer
     )
-    eig_vec = torch.from_numpy(np.reshape(eig_vec, (1,eig_vec.shape[0], eig_vec.shape[1]))).to(model.device)
+    eig_vec = torch.from_numpy(
+        np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
+    ).to(model.device)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     if torch.equal(encoded[:2], torch.tensor([2, 256000]).to(model.device)):
         encoded[:2] = torch.tensor([256000, 2]).to(model.device)

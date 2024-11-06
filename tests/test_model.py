@@ -4,6 +4,7 @@ from copy import deepcopy
 from functools import partial
 
 import pytest
+from unittest import mock
 import torch
 from lightning import Fabric
 from lightning.fabric.utilities.imports import _IS_WINDOWS
@@ -28,6 +29,7 @@ from transformers.models.mistral import MistralConfig, MistralForCausalLM
 from transformers.models.mixtral import MixtralConfig, MixtralForCausalLM
 
 import litgpt.config as config_module
+from litgpt.model import batched_index_copy_
 from litgpt import GPT, Config
 from litgpt.scripts.convert_hf_checkpoint import (
     copy_weights_falcon,
@@ -216,6 +218,8 @@ def test_against_original_open_llama_3b(device, dtype):
         {"name": "Llama-3.1-405B", "n_query_groups": 4},
         {"name": "Llama-3.1-8B"},
         {"name": "Llama-3.1-8B-Instruct"},
+        {"name": "Llama-3.2-1B"},
+        {"name": "Llama-3.2-3B"},
     ],
 )
 @pytest.mark.parametrize(
@@ -320,7 +324,7 @@ def test_against_hf_phi(model_name, device, dtype):
 
 
 @torch.inference_mode()
-@pytest.mark.parametrize("model_name", ("Phi-3-mini-4k-instruct", "Phi-3.5-mini-instruct"))
+@pytest.mark.parametrize("model_name", ("Phi-3-mini-4k-instruct", "Phi-3-mini-128k-instruct", "Phi-3.5-mini-instruct"))
 @pytest.mark.parametrize(
     ("device", "dtype"),
     [
@@ -395,12 +399,77 @@ def test_against_hf_phi_3(model_name, device, dtype):
         ),
     ],
 )
-@pytest.mark.parametrize("model_name", ["Mistral-7B-Instruct-v0.1", "Mathstral-7B-v0.1"])
+@pytest.mark.parametrize("model_name", ["Mistral-7B-Instruct-v0.1", "Mistral-7B-v0.1"])
 def test_against_mistral_hf_models(device, dtype, model_name):
     torch.set_default_dtype(dtype)
 
+    T = 20
     ours_config = Config.from_name(
         model_name,
+        padded_vocab_size=10000,
+        block_size=T,
+        sliding_window_size=T // 2,
+        sliding_window_layer_placing="all",
+        n_layer=2,
+        n_embd=32,
+        n_head=8,
+        n_query_groups=2,
+        intermediate_size=86,
+    )
+
+    theirs_config = MistralConfig(
+        vocab_size=ours_config.padded_vocab_size,
+        hidden_size=ours_config.n_embd,
+        num_attention_heads=ours_config.n_head,
+        num_hidden_layers=ours_config.n_layer,
+        intermediate_size=ours_config.intermediate_size,
+        max_position_embeddings=ours_config.block_size,
+        rms_norm_eps=ours_config.norm_eps,
+        num_key_value_heads=ours_config.n_query_groups,
+        rope_theta=ours_config.rope_base,
+        attn_implementation="eager",
+        sliding_window=ours_config.sliding_window_size,
+    )
+
+    assert ours_config.intermediate_size == theirs_config.intermediate_size
+
+    theirs_model = MistralForCausalLM(theirs_config).to(device)
+    theirs_state_dict = theirs_model.state_dict()
+    state_dict = {}
+    copy_weights_hf_llama(ours_config, {}, state_dict, theirs_state_dict)
+    ours_model = GPT(ours_config).to(device)
+    ours_model.load_state_dict(state_dict)
+
+    # test end to end
+    x = torch.randint(low=0, high=ours_config.padded_vocab_size, size=(T,), device=device).unsqueeze(0)
+    assert x.size(1) == T
+    ours_y = ours_model(x)
+    theirs_y = theirs_model(x)["logits"].to(dtype)  # HF converts logits to float
+    torch.testing.assert_close(ours_y, theirs_y)
+
+
+@torch.inference_mode()
+@pytest.mark.parametrize(
+    ("device", "dtype"),
+    [
+        (torch.device("cpu"), torch.float32),
+        pytest.param(
+            torch.device("cuda"),
+            torch.float16,
+            marks=[
+                # the reference does softmax upscaled to fp32 during attention. additionally, the final layernorm input
+                # is slightly different
+                pytest.mark.xfail(raises=AssertionError, strict=False),
+                RunIf(min_cuda_gpus=1),
+            ],
+        ),
+    ],
+)
+def test_against_mathstral_hf_models(device, dtype):
+    torch.set_default_dtype(dtype)
+
+    ours_config = Config.from_name(
+        "Mathstral-7B-v0.1",
         padded_vocab_size=10000,
         n_layer=2,
         n_embd=32,
@@ -657,7 +726,7 @@ def test_against_original_gemma_2(model_name, device, dtype):
     assert x.size(1) == T
     ours_y = ours_model(x)
     theirs_y = theirs_model(x)["logits"].to(dtype)  # HF converts logits to float
-    torch.testing.assert_close(ours_y, theirs_y)
+    torch.testing.assert_close(ours_y, theirs_y, rtol=3e-5, atol=3e-5)
 
 
 @RunIf(dynamo=True)
@@ -742,15 +811,20 @@ def test_sdpa_choice(config):
     torch.set_default_dtype(torch.float16)
 
     def assert_sdpa_backend(original_fn, q, k, v, mask):
-        params = SDPAParams(q, k, v, mask, 0.0, True)
+        # SDPAParams gained an additional argument in PyTorch 2.5
+        args = []
+        if hasattr(SDPAParams, "enable_gqa"):
+            args.append(False)
+        params = SDPAParams(q, k, v, mask, 0.0, True, *args)
         if expected is SDPBackend.FLASH_ATTENTION:
-            assert flash_sdp_enabled()
-            assert can_use_flash_attention(params, True)
+            assert flash_sdp_enabled(), "flash_sdp_enabled() is False"
+            if config.sliding_window_size is None:
+                assert can_use_flash_attention(params, True), "can_use_flash_attention(params, True) is False"
         elif expected is SDPBackend.EFFICIENT_ATTENTION:
-            assert mem_efficient_sdp_enabled()
-            assert can_use_efficient_attention(params, True)
+            assert mem_efficient_sdp_enabled(), "mem_efficient_sdp_enabled() is False"
+            assert can_use_efficient_attention(params, True), "can_use_efficient_attention(params, True) is False"
         elif expected is SDPBackend.MATH:
-            assert math_sdp_enabled()
+            assert math_sdp_enabled(), "math_sdp_enabled() is False"
         else:
             raise NotImplementedError
         return original_fn(q, k, v, mask)
@@ -786,7 +860,11 @@ def test_sdpa_choice_kv_cache(config):
     torch.set_default_dtype(torch.float16)
 
     def assert_sdpa_backend(original_fn, q, k, v, mask):
-        params = SDPAParams(q, k, v, mask, 0.0, True)
+        # SDPAParams gained an additional argument in PyTorch 2.5
+        args = []
+        if hasattr(SDPAParams, "enable_gqa"):
+            args.append(False)
+        params = SDPAParams(q, k, v, mask, 0.0, True, *args)
         if expected is SDPBackend.FLASH_ATTENTION:
             assert flash_sdp_enabled()
             assert can_use_flash_attention(params, True)
@@ -855,3 +933,65 @@ def test_reset_parameters_device():
     _materialize_meta_tensors(model, torch.device("cuda"))
     model.reset_parameters()
     assert model.cos.device.type == "cuda"
+
+
+def test_batched_index_copy_modes():
+    # Mock the torch.backends.mps.is_available() function to simulate MPS availability
+    with mock.patch("torch.backends.mps.is_available", return_value=True):
+        # Mock the device type to simulate the "mps" device
+        with mock.patch("torch.Tensor.device", new_callable=mock.PropertyMock) as mock_device:
+            mock_device.return_value = torch.device("mps")
+
+            # Test case when idx.dim() == 1
+            t_original_1 = torch.randn(3, 5)
+            dim_1 = 0
+            idx_1 = torch.tensor([0, 2])
+            val_1 = torch.randn(2, 5)
+
+            t1_cpu = t_original_1.clone()
+            t1_mps = t_original_1.clone()
+
+            # Perform the index copy on CPU
+            batched_index_copy_(t1_cpu, dim_1, idx_1, val_1)
+
+            # Simulate the MPS index copy
+            idx_1_mps = idx_1
+            val_1_mps = val_1
+            batched_index_copy_(t1_mps, dim_1, idx_1_mps, val_1_mps)
+            assert torch.allclose(t1_cpu, t1_mps), "Mismatch with idx.dim() == 1 on mocked MPS"
+
+            # Test case when idx.dim() == 2
+            t_original_2 = torch.randn(2, 5, 4)
+            dim_2 = 1
+            idx_2 = torch.tensor([[0, 2], [1, 3]])
+            val_2 = torch.randn(2, 2, 4)
+
+            t2_cpu = t_original_2.clone()
+            t2_mps = t_original_2.clone()
+
+            # Perform the index copy on CPU
+            batched_index_copy_(t2_cpu, dim_2, idx_2, val_2)
+
+            # Simulate the MPS index copy
+            idx_2_mps = idx_2
+            val_2_mps = val_2
+            batched_index_copy_(t2_mps, dim_2, idx_2_mps, val_2_mps)
+            assert torch.allclose(t2_cpu, t2_mps), "Mismatch with idx.dim() == 2 on mocked MPS"
+
+            # Additional test with negative dimension
+            t_original_3 = torch.randn(2, 3, 4)
+            dim_3 = -2
+            idx_3 = torch.tensor([[0, 1], [1, 2]])
+            val_3 = torch.randn(2, 2, 4)
+
+            t3_cpu = t_original_3.clone()
+            t3_mps = t_original_3.clone()
+
+            # Perform the index copy on CPU
+            batched_index_copy_(t3_cpu, dim_3, idx_3, val_3)
+
+            # Simulate the MPS index copy
+            idx_3_mps = idx_3
+            val_3_mps = val_3
+            batched_index_copy_(t3_mps, dim_3, idx_3_mps, val_3_mps)
+            assert torch.allclose(t3_cpu, t3_mps), "Mismatch with negative dimension on mocked MPS"

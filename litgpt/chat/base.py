@@ -14,7 +14,6 @@ from litgpt.model import GPT
 from litgpt.config import Config
 from litgpt.prompts import PromptStyle
 from litgpt.tokenizer import Tokenizer
-from litgpt.generate.base import next_token
 from litgpt.prompts import has_prompt_style, load_prompt_style
 from litgpt.scripts.merge_lora import merge_lora
 from litgpt.utils import (
@@ -110,7 +109,7 @@ def process_prompt(
         top_p=top_p,
         stop_tokens=stop_tokens,
     )
-    token_generator: Iterator[str] = tokenizer.decode_stream(y)
+    token_generator: Iterator[str] = tokenizer.decode_stream(y, device=fabric.device)
 
     fabric.print(">> Reply: ", end="")
 

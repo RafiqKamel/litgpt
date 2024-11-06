@@ -5,6 +5,7 @@ from pathlib import Path
 from litgpt.special_tokens import new_tokens_amr
 from typing import Optional, Union, Iterable, Iterator
 
+from litgpt.utils import fix_and_load_json
 import torch
 
 
@@ -49,8 +50,15 @@ class Tokenizer:
             if (
                 special_tokens_path := checkpoint_dir / "generation_config.json"
             ).is_file():
-                with open(special_tokens_path, encoding="utf-8") as fp:
-                    config = json.load(fp)
+                try:
+                    with open(special_tokens_path, encoding="utf-8") as fp:
+                        config = json.load(fp)
+                except (
+                    json.JSONDecodeError
+                ):  # Some files like the Llama 3.2 one have bugs
+                    with open(special_tokens_path, encoding="utf-8") as fp:
+                        json_string = fp.read()
+                        config = fix_and_load_json(json_string)
                 if self.bos_id is None:
                     self.bos_id = config.get("bos_token_id")
                 if self.eos_id is None:
@@ -103,7 +111,7 @@ class Tokenizer:
             config = json.load(fp)
         # for LlaMA-3 tokenizer there is no `add_bos_token` at all and `tokenizer_class` is only
         # `PreTrainedTokenizerFast`
-        if checkpoint_dir.stem.startswith("Meta-Llama-3"):
+        if checkpoint_dir.stem.startswith(("Meta-Llama-3", "Llama-3")):
             return True
         if "add_bos_token" in config:
             return config["add_bos_token"]
@@ -149,3 +157,34 @@ class Tokenizer:
     def decode(self, tensor: torch.Tensor) -> str:
         tokens = [tensor.item()] if tensor.ndim == 0 else tensor.tolist()
         return self.processor.decode(tokens)
+
+    def decode_stream(
+        self,
+        token_stream: Iterable[torch.Tensor],
+        device: Optional[torch.device] = None,
+    ) -> Iterator[str]:
+        if self.backend == "huggingface":
+            try:
+                for token in token_stream:
+                    yield self.decode(token)
+            except KeyboardInterrupt:
+                return
+        elif self.backend == "sentencepiece":
+            # TODO: Is there a way to not have to do this?
+            # This may actually affect our tokens per second.
+
+            # sentencepiece does not support decoding token-by-token because it adds spaces based on the surrounding tokens
+            # meaning that we need to decode everything each time
+            so_far = torch.tensor([], dtype=torch.long, device=device)
+            decoded_so_far = ""
+            try:
+                for token in token_stream:
+                    so_far = so_far.to(device=token.device)
+                    so_far = torch.cat((so_far, token.view(-1)))
+                    decoded_new = self.decode(so_far)
+                    yield decoded_new[len(decoded_so_far) :]
+                    decoded_so_far = decoded_new
+            except KeyboardInterrupt:
+                return
+        else:
+            raise NotImplementedError(self.backend)

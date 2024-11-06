@@ -309,7 +309,7 @@ def test_against_original_gemma_2(model_name):
     assert x.size(1) == T
     ours_y = ours_model(x)
     theirs_y = theirs_model(x)["logits"].to(dtype)  # HF converts logits to float
-    torch.testing.assert_close(ours_y, theirs_y)
+    torch.testing.assert_close(ours_y, theirs_y, rtol=3e-5, atol=3e-5)  # some macOS devices have numerical differences, hence the tol bump
 
 
 @RunIf(min_cuda_gpus=1)
@@ -331,6 +331,11 @@ def test_adapter_v2_bitsandbytes(monkeypatch, tmp_path, fake_checkpoint_dir, alp
 
     monkeypatch.setattr(module, "load_checkpoint", Mock())
     train_mock = Mock()
+    train_mock.return_value = {
+        "raw_tokens": 1000,
+        "raw_tokens_plus_prompt_template": 1100,
+        "raw_tokens_plus_prompt_template_and_padding": 1200,
+    }
     monkeypatch.setattr(module, "fit", train_mock)
 
     stdout = StringIO()
@@ -405,6 +410,8 @@ def test_adapter_v2_bitsandbytes(monkeypatch, tmp_path, fake_checkpoint_dir, alp
             "transformer.h.1.mlp.fc.adapter_scale",
             "transformer.h.1.attn.attn.linear.bias",
             "transformer.wte.weight",
+            "transformer.wte.norm.weight",
+            "transformer.wte.norm.bias",
             "transformer.h.0.norm_2.weight",
             "transformer.h.1.mlp.proj.linear.bias",
             "transformer.h.0.attn.gating_factor",

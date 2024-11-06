@@ -62,6 +62,7 @@ class Config:
     intermediate_size: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
+    rope_adjustments: Optional[dict] = None
     n_expert: int = 0
     n_expert_per_token: int = 0
     attention_logit_softcapping: Optional[float] = None
@@ -880,7 +881,7 @@ llama_3 = [
     dict(
         name="Llama-3.1-8B{}",
         hf_config=dict(org="meta-llama", name="Meta-Llama-3.1-8B{}"),
-        block_size=8192,
+        block_size=131072,
         vocab_size=128000,
         padded_vocab_size=128256,
         n_layer=32,
@@ -893,6 +894,7 @@ llama_3 = [
         mlp_class_name="LLaMAMLP",
         intermediate_size=14336,
         rope_base=500000,
+        rope_adjustments=dict(factor=8.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
     ),
     # https://huggingface.co/meta-llama/Meta-Llama-3-70B/blob/main/config.json
     dict(
@@ -917,7 +919,7 @@ llama_3 = [
     dict(
         name="Llama-3.1-70B{}",
         hf_config=dict(org="meta-llama", name="Meta-Llama-3.1-70B{}"),
-        block_size=8192,
+        block_size=131072,
         vocab_size=128000,
         padded_vocab_size=128256,
         n_layer=80,
@@ -931,6 +933,7 @@ llama_3 = [
         mlp_class_name="LLaMAMLP",
         intermediate_size=28672,
         rope_base=500000,
+        rope_adjustments=dict(factor=8.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
     ),
     # https://huggingface.co/meta-llama/Meta-Llama-3.1-405B/blob/main/config.json
     dict(
@@ -950,6 +953,47 @@ llama_3 = [
         mlp_class_name="LLaMAMLP",
         intermediate_size=53248,
         rope_base=500000,
+        rope_adjustments=dict(factor=8.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
+    ),
+    # https://huggingface.co/meta-llama/Llama-3.2-1B/blob/main/config.json
+    dict(
+        name="Llama-3.2-1B{}",
+        hf_config=dict(org="meta-llama", name="Llama-3.2-1B{}"),
+        block_size=131072,
+        vocab_size=128000,
+        padded_vocab_size=128256,
+        n_layer=16,
+        n_embd=2048,
+        n_head=32,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=8192,
+        rope_base=500000,
+        rope_adjustments=dict(factor=32.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
+    ),
+    # https://huggingface.co/meta-llama/Llama-3.2-3B/blob/main/config.json
+    dict(
+        name="Llama-3.2-3B{}",
+        hf_config=dict(org="meta-llama", name="Llama-3.2-3B{}"),
+        block_size=131072,
+        vocab_size=128000,
+        padded_vocab_size=128256,
+        n_layer=28,
+        n_embd=3072,
+        n_head=24,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=8192,
+        rope_base=500000,
+        rope_adjustments=dict(factor=32.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
     ),
 ]
 for c in llama_3:
@@ -959,7 +1003,30 @@ for c in llama_3:
         copy["hf_config"]["name"] = c["hf_config"]["name"].format(kind)
         configs.append(copy)
 
-
+#########################
+# NVIDIA Llama Nemotron
+#########################
+configs.append(
+    dict(
+        name="Llama-3.1-Nemotron-70B-Instruct-HF",
+        hf_config=dict(org="nvidia", name="Llama-3.1-Nemotron-70B-Instruct-HF"),
+        block_size=131072,
+        vocab_size=128000,
+        padded_vocab_size=128256,
+        n_layer=80,
+        n_head=64,
+        n_embd=8192,
+        n_query_groups=8,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_class_name="RMSNorm",
+        mlp_class_name="LLaMAMLP",
+        intermediate_size=28672,
+        rope_base=500000,
+        rope_adjustments=dict(factor=8.0, low_freq_factor=1.0, high_freq_factor=4.0, original_max_seq_len=8192)
+    ),
+)
 ###############
 # Google Gemma
 ###############
@@ -1613,6 +1680,26 @@ phi = [
         intermediate_size=8192,
         mlp_class_name="LLaMAMLP",
         parallel_residual=False,
+        sliding_window_size=2048,
+        sliding_window_layer_placing="all",
+    ),
+    # https://huggingface.co/microsoft/Phi-3-mini-128k-instruct/blob/main/config.json
+    dict(
+        name="Phi-3-mini-128k-instruct",
+        hf_config=dict(org="microsoft", name="Phi-3-mini-128k-instruct"),
+        vocab_size=32000,
+        padded_vocab_size=32064,
+        block_size=131072,
+        n_embd=3072,
+        n_layer=32,
+        rotary_percentage=1.0,
+        bias=False,
+        norm_class_name="RMSNorm",
+        intermediate_size=8192,
+        mlp_class_name="LLaMAMLP",
+        parallel_residual=False,
+        sliding_window_size=262145,
+        sliding_window_layer_placing="all",
     ),
     # https://huggingface.co/microsoft/Phi-3.5-mini-instruct/blob/main/config.json
     dict(
@@ -1654,6 +1741,8 @@ configs.append(
         norm_eps=1e-05,
         mlp_class_name="LLaMAMLP",
         intermediate_size=14336,
+        sliding_window_size=4096,
+        sliding_window_layer_placing="all",
     )
 )
 
@@ -1673,6 +1762,8 @@ mistral = [
         norm_eps=1e-05,
         mlp_class_name="LLaMAMLP",
         intermediate_size=14336,
+        sliding_window_size=4096,
+        sliding_window_layer_placing="all",
     ),
     # https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/blob/main/config.json
     dict(

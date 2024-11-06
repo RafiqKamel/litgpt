@@ -84,7 +84,7 @@ class SFTDataset(Dataset):
     def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx: int) -> Dict[str, Tensor]:
+    def __getitem__(self, idx: int) -> Dict[str, Union[Tensor, Dict[str, int]]]:
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)
@@ -110,6 +110,8 @@ class SFTDataset(Dataset):
         if self.mask_prompt:
             labels[: len(encoded_prompt)] = self.ignore_index
         if "graph" in example:
+        raw_token_count = len(self.tokenizer.encode(example["instruction"], max_length=self.max_seq_length)) + len(encoded_response)
+
             graph = example["graph"]
         else:
             graph = recreate_graph(example["graph_str"])
@@ -127,9 +129,16 @@ class SFTDataset(Dataset):
             print("mistake",list(encoded_prompt_and_response)[:3])
             print(encoded_prompt_and_response)
         return {
+            
             "input_ids": encoded_prompt_and_response.type(torch.int64),
+           
             "labels": labels.type(torch.int64),
             "eig_vec": torch.from_numpy(eig_vec)
+        ,
+            "token_counts": {
+                "raw": raw_token_count,
+                "raw_plus_prompt_template": len(encoded_prompt_and_response),
+            }
         }
 
 
@@ -171,5 +180,13 @@ def _sft_collate_fn(
         # Truncate if needed
         if max_seq_length > 0:
             batched[key] = batched[key][:, :max_seq_length]
+
+    batched["token_counts"] = {}
+    batched["token_counts"]["raw"] = torch.tensor(  # Token count without padding and without prompt template
+        [sample["token_counts"]["raw"] for sample in samples], dtype=torch.int64
+    ).unsqueeze(1)
+    batched["token_counts"]["raw_plus_prompt_template"] = torch.tensor(  # Token count without padding but with prompt template
+        [sample["token_counts"]["raw_plus_prompt_template"] for sample in samples], dtype=torch.int64
+    ).unsqueeze(1)
 
     return batched
