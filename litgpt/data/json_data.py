@@ -62,11 +62,14 @@ class JSON(DataModule):
             self.prompt_style = PromptStyle.from_name(self.prompt_style)
 
     def connect(
-        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None
+        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None, direction: str = None
     ) -> None:
+        if direction is None:
+            raise ValueError("You must provide a direction for the JSON data module.")
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.max_seq_length = -1 if max_seq_length is None else max_seq_length
+        self.direction = direction
 
     def setup(self, stage: str = "") -> None:
         train_data, test_data = self.get_splits()
@@ -78,6 +81,7 @@ class JSON(DataModule):
             max_seq_length=self.max_seq_length,
             mask_prompt=self.mask_prompt,
             ignore_index=self.ignore_index,
+            direction=self.direction,
         )
         self.test_dataset = SFTDataset(
             data=test_data,
@@ -86,6 +90,7 @@ class JSON(DataModule):
             max_seq_length=self.max_seq_length,
             mask_prompt=self.mask_prompt,
             ignore_index=self.ignore_index,
+            direction=self.direction,
         )
 
     def train_dataloader(self) -> DataLoader:
