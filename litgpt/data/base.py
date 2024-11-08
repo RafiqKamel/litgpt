@@ -7,7 +7,8 @@ import torch
 from lightning import LightningDataModule
 from torch import Tensor
 from torch.utils.data import Dataset
-
+import unicodedata
+from unidecode import unidecode
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
@@ -63,6 +64,7 @@ class SFTDataset(Dataset):
         data: List[Dict[str, str]],
         tokenizer: Tokenizer,
         prompt_style: Union[str, PromptStyle],
+        direction: str,
         max_seq_length: int = -1,
         mask_prompt: bool = True,
         ignore_index: int = -100,
@@ -70,8 +72,7 @@ class SFTDataset(Dataset):
     ) -> None:
         self.data = data
         self.tokenizer = tokenizer
-        prompt_style = "amr2text"
-        #prompt_style = "text2amr"
+        prompt_style = "amr2text" if direction == "amr2text" else "text2amr" if direction == "text2amr" else prompt_style
         print("prompt_style", prompt_style)
         self.prompt_style = (
             prompt_style
@@ -90,6 +91,8 @@ class SFTDataset(Dataset):
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)
+        example["instruction"] = unidecode(example["instruction"])
+        example["output"] = unidecode(example["output"])   
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
