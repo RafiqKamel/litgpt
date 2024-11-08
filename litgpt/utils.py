@@ -804,15 +804,18 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
                 raise ValueError(f"\n sentence: {sentence} \n subtokens: {subtoken_map}\n token: {token} \n subtoken_index: {subtoken_index}  \n tokens: {token_map}  \n subtokens for token {subtokens_for_token} \n index map {index_map}"  )
             subtoken_index += 1
         if strip_string(token) != strip_string(current_subtoken):
-            print(f"MISTAKE: Token: ({token})  Subtokens: ({subtokens_for_token}) Subtoken: ({current_subtoken}) subtoken_index: {subtoken_index}")
+            print(f"MISTAKE: Token: ({token})  Subtokens: ({subtokens_for_token}) Subtoken: ({current_subtoken}) subtoken_index: {subtoken_index} \n stripped token {strip_string(token)} stripped subtoken {strip_string(current_subtoken)}")
+            print("unicode token", [ord(c) for c in token], "unicode subtoken", [ord(c) for c in current_subtoken])
+            print("unicode stripped token", [ord(c) for c in strip_string(token)], "unicode stripped subtoken", [ord(c) for c in strip_string(current_subtoken)])
+            print("subtoken_map", {i: subtoken for i, subtoken in enumerate(subtokens)})
         index_map[i] = subtokens_for_token
 
     return index_map
 
 
 def strip_string(string):
-    string = unicodedata.normalize("NFKD", string)
-    return string.replace(" ","").replace('"',"")
+    string = unicodedata.normalize("NFC", string)
+    return string.replace(" ","")
 
 def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
     if len(eigvecs) == len(tokenizer.encode(sentence)):
