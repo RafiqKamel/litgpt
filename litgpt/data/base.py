@@ -72,7 +72,11 @@ class SFTDataset(Dataset):
     ) -> None:
         self.data = data
         self.tokenizer = tokenizer
-        prompt_style = "amr2text" if direction == "amr2text" else "text2amr" if direction == "text2amr" else prompt_style
+        prompt_style = (
+            "amr2text"
+            if direction == "amr2text"
+            else "text2amr" if direction == "text2amr" else prompt_style
+        )
         print("prompt_style", prompt_style)
         self.prompt_style = (
             prompt_style
@@ -92,7 +96,7 @@ class SFTDataset(Dataset):
         if self.transform is not None:
             example = self.transform(example)
         example["instruction"] = unidecode(example["instruction"])
-        example["output"] = unidecode(example["output"])   
+        example["output"] = unidecode(example["output"])
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
@@ -108,50 +112,75 @@ class SFTDataset(Dataset):
                 : self.max_seq_length
             ]
         if self.max_seq_length < len(encoded_prompt_and_response):
-            print("Warning: Sequence length exceeds max_seq_length", len(encoded_prompt_and_response), self.max_seq_length)    
+            print(
+                "Warning: Sequence length exceeds max_seq_length",
+                len(encoded_prompt_and_response),
+                self.max_seq_length,
+            )
 
         # The labels are the full prompt with response, but with the prompt masked out
         labels = encoded_prompt_and_response.clone()
         if self.mask_prompt:
             labels[: len(encoded_prompt)] = self.ignore_index
         if "graph" in example:
-        raw_token_count = len(self.tokenizer.encode(example["instruction"], max_length=self.max_seq_length)) + len(encoded_response)
+            raw_token_count = len(
+                self.tokenizer.encode(
+                    example["instruction"], max_length=self.max_seq_length
+                )
+            ) + len(encoded_response)
 
             graph = example["graph"]
         else:
             if example["graph_str"] == "NA":
-                n_tokens_instruction = len(self.tokenizer.encode(example["instruction"]))
+                n_tokens_instruction = len(
+                    self.tokenizer.encode(example["instruction"])
+                )
                 if n_tokens_instruction < 2:
-                    print("Warning: n_tokens_instruction is 0 OR 1", example["instruction"])
+                    print(
+                        "Warning: n_tokens_instruction is 0 OR 1",
+                        example["instruction"],
+                    )
                 example["graph_str"] = create_edge_list_sequence(n_tokens_instruction)
-            try:        
+            try:
                 graph = recreate_graph(example["graph_str"])
             except:
-                raise Exception("Error: Could not recreate graph", example["graph_str"], n_tokens_instruction)  
+                raise Exception(
+                    "Error: Could not recreate graph",
+                    example["graph_str"],
+                    n_tokens_instruction,
+                )
             self.data[idx]["graph"] = graph
         if "eig_vec" in example:
             eig_vec = example["eig_vec"]
         else:
             if graph is None:
                 eig_vec = None
-            else:    
+            else:
                 eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
-                eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
-                self.data[idx]["eig_vec"] = eig_vec     
-        
-        starting_token_id = self.tokenizer.encode("<AMR>") if prompt == "amr2text" else self.tokenizer.encode("<text>")
-        if torch.equal(encoded_prompt_and_response[:2], torch.tensor([2, starting_token_id])):
+                eig_vec = process_eigenvectors_subtokens(
+                    eigvecs=eig_vec,
+                    sentence=example["instruction"],
+                    tokenizer=self.tokenizer,
+                )
+                self.data[idx]["eig_vec"] = eig_vec
+
+        starting_token_id = (
+            self.tokenizer.encode("<AMR>")
+            if prompt == "amr2text"
+            else self.tokenizer.encode("<text>")
+        )
+        if torch.equal(
+            encoded_prompt_and_response[:2], torch.tensor([2, starting_token_id])
+        ):
             encoded_prompt_and_response[:2] = torch.tensor([starting_token_id, 2])
         return {
-            
             "input_ids": encoded_prompt_and_response.type(torch.int64),
-           
             "labels": labels.type(torch.int64),
             "eig_vec": torch.from_numpy(eig_vec) if eig_vec is not None else None,
             "token_counts": {
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
-            }
+            },
         }
 
 
@@ -195,11 +224,16 @@ def _sft_collate_fn(
             batched[key] = batched[key][:, :max_seq_length]
 
     batched["token_counts"] = {}
-    batched["token_counts"]["raw"] = torch.tensor(  # Token count without padding and without prompt template
-        [sample["token_counts"]["raw"] for sample in samples], dtype=torch.int64
-    ).unsqueeze(1)
-    batched["token_counts"]["raw_plus_prompt_template"] = torch.tensor(  # Token count without padding but with prompt template
-        [sample["token_counts"]["raw_plus_prompt_template"] for sample in samples], dtype=torch.int64
-    ).unsqueeze(1)
+    batched["token_counts"]["raw"] = (
+        torch.tensor(  # Token count without padding and without prompt template
+            [sample["token_counts"]["raw"] for sample in samples], dtype=torch.int64
+        ).unsqueeze(1)
+    )
+    batched["token_counts"]["raw_plus_prompt_template"] = (
+        torch.tensor(  # Token count without padding but with prompt template
+            [sample["token_counts"]["raw_plus_prompt_template"] for sample in samples],
+            dtype=torch.int64,
+        ).unsqueeze(1)
+    )
 
     return batched
