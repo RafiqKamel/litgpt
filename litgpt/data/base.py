@@ -7,13 +7,14 @@ import torch
 from lightning import LightningDataModule
 from torch import Tensor
 from torch.utils.data import Dataset
-
+import unicodedata
+from unidecode import unidecode
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
 from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.utils import recreate_graph
-from litgpt.utils import process_eigenvectors_subtokens
+from litgpt.utils import process_eigenvectors_subtokens, create_edge_list_sequence
 
 
 class DataModule(LightningDataModule):
@@ -63,6 +64,7 @@ class SFTDataset(Dataset):
         data: List[Dict[str, str]],
         tokenizer: Tokenizer,
         prompt_style: Union[str, PromptStyle],
+        direction: str,
         max_seq_length: int = -1,
         mask_prompt: bool = True,
         ignore_index: int = -100,
@@ -70,7 +72,8 @@ class SFTDataset(Dataset):
     ) -> None:
         self.data = data
         self.tokenizer = tokenizer
-        prompt_style = "amr2text"
+        prompt_style = "amr2text" if direction == "amr2text" else "text2amr" if direction == "text2amr" else prompt_style
+        print("prompt_style", prompt_style)
         self.prompt_style = (
             prompt_style
             if isinstance(prompt_style, PromptStyle)
@@ -88,6 +91,8 @@ class SFTDataset(Dataset):
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)
+        example["instruction"] = unidecode(example["instruction"])
+        example["output"] = unidecode(example["output"])   
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
@@ -114,27 +119,35 @@ class SFTDataset(Dataset):
 
             graph = example["graph"]
         else:
-            graph = recreate_graph(example["graph_str"])
+            if example["graph_str"] == "NA":
+                n_tokens_instruction = len(self.tokenizer.encode(example["instruction"]))
+                if n_tokens_instruction < 2:
+                    print("Warning: n_tokens_instruction is 0 OR 1", example["instruction"])
+                example["graph_str"] = create_edge_list_sequence(n_tokens_instruction)
+            try:        
+                graph = recreate_graph(example["graph_str"])
+            except:
+                raise Exception("Error: Could not recreate graph", example["graph_str"], n_tokens_instruction)  
             self.data[idx]["graph"] = graph
         if "eig_vec" in example:
             eig_vec = example["eig_vec"]
         else:
-            eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
-            eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
-            self.data[idx]["eig_vec"] = eig_vec     
+            if graph is None:
+                eig_vec = None
+            else:    
+                eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
+                eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
+                self.data[idx]["eig_vec"] = eig_vec     
         
-        if torch.equal(encoded_prompt_and_response[:2], torch.tensor([2, 256000])):
-            encoded_prompt_and_response[:2] = torch.tensor([256000, 2])
-        else:
-            print("mistake",list(encoded_prompt_and_response)[:3])
-            print(encoded_prompt_and_response)
+        starting_token_id = self.tokenizer.encode("<AMR>") if prompt == "amr2text" else self.tokenizer.encode("<text>")
+        if torch.equal(encoded_prompt_and_response[:2], torch.tensor([2, starting_token_id])):
+            encoded_prompt_and_response[:2] = torch.tensor([starting_token_id, 2])
         return {
             
             "input_ids": encoded_prompt_and_response.type(torch.int64),
            
             "labels": labels.type(torch.int64),
-            "eig_vec": torch.from_numpy(eig_vec)
-        ,
+            "eig_vec": torch.from_numpy(eig_vec) if eig_vec is not None else None,
             "token_counts": {
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),

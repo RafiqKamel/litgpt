@@ -269,7 +269,7 @@ def main(
 
     optimizer = fabric.setup_optimizers(optimizer)
     scheduler = get_lr_scheduler(
-        optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps
+        optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps, batch_size=train.global_batch_size
     )
 
     # strict=False because missing keys due to LoRA weights not contained in state dict
@@ -500,6 +500,7 @@ def fit(
                 f" val: {val_loss} |"
                 f" iter time: {metrics['iter_time'] * 1000:.2f} ms"
                 f"{' (step)' if not is_accumulating else ''}"
+                f" | learning rate: {metrics['learning_rate']:.2e}"
             )
             fabric.log_dict(metrics, step=iter_num)
 
@@ -614,11 +615,19 @@ def generate_example(
     output = tokenizer.decode(output)
     fabric.print(output)
 
+def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, batch_size: int, base_batch_size = 64):
+    # Scale learning rate based on batch size
+    scaling_factor = batch_size / base_batch_size
+    initial_lr = optimizer.param_groups[0]['lr']
+    scaled_lr = initial_lr * scaling_factor
 
-def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int):
-    # linear warmup followed by cosine annealing
+    # Update optimizer's learning rate with scaled value
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = scaled_lr
+
+    # Define the warmup and cosine annealing schedulers
     scheduler1 = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda step: step / warmup_steps
+        optimizer, lambda step: (step / warmup_steps) * scaling_factor
     )
     scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=(max_steps - warmup_steps)
@@ -627,7 +636,6 @@ def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int):
         optimizer, [scheduler1, scheduler2], milestones=[warmup_steps]
     )
 
-
 def get_dataloaders(
     fabric: L.Fabric, data: DataModule, tokenizer: Tokenizer, train: TrainArgs
 ) -> Tuple[DataLoader, DataLoader]:
@@ -635,6 +643,7 @@ def get_dataloaders(
         tokenizer=tokenizer,
         batch_size=train.micro_batch_size,
         max_seq_length=train.max_seq_length,
+        direction = train.direction
     )
     with fabric.rank_zero_first():
         data.prepare_data()

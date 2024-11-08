@@ -32,6 +32,7 @@ class TrainArgs:
     """Limits the length of samples"""
     tie_embeddings: Optional[bool] = None
     """Whether to tie the embedding weights with the language modeling head weights"""
+    direction: str = None
 
     # Optimization args
     max_norm: Optional[float] = None
