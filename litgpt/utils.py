@@ -675,7 +675,7 @@ def extend_checkpoint_dir(checkpoint_dir: Path) -> Path:
 
 def recreate_graph(edge_list_str: str):
     if edge_list_str == "":
-        graph = nx.Graph()
+        graph = nx.DiGraph()
         graph.add_node(0)
         return graph
     # Split the string into lines
@@ -685,7 +685,7 @@ def recreate_graph(edge_list_str: str):
     edges = [tuple(map(int, line.split())) for line in edge_list_lines]
 
     # Create a new graph and add the edges
-    G_loaded = nx.Graph()
+    G_loaded = nx.DiGraph()
     G_loaded.add_edges_from(edges)
     return G_loaded
 
@@ -804,10 +804,7 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
                 raise ValueError(f"\n sentence: {sentence} \n subtokens: {subtoken_map}\n token: {token} \n subtoken_index: {subtoken_index}  \n tokens: {token_map}  \n subtokens for token {subtokens_for_token} \n index map {index_map}"  )
             subtoken_index += 1
         if strip_string(token) != strip_string(current_subtoken):
-            print(f"MISTAKE: Token: ({token})  Subtokens: ({subtokens_for_token}) Subtoken: ({current_subtoken}) subtoken_index: {subtoken_index} \n stripped token {strip_string(token)} stripped subtoken {strip_string(current_subtoken)}")
-            print("unicode token", [ord(c) for c in token], "unicode subtoken", [ord(c) for c in current_subtoken])
-            print("unicode stripped token", [ord(c) for c in strip_string(token)], "unicode stripped subtoken", [ord(c) for c in strip_string(current_subtoken)])
-            print("subtoken_map", {i: subtoken for i, subtoken in enumerate(subtokens)})
+            raise ValueError(f"Token {token} does not match subtokens {current_subtoken}")
         index_map[i] = subtokens_for_token
 
     return index_map
