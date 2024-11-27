@@ -2,29 +2,30 @@ import numpy as np
 import networkx as nx
 from litgpt.positional_encodings_config import magentic_laplace_encodings_q
 
-def magnetic_laplacian(g, tolerance, q=magentic_laplace_encodings_q):
+from scipy.sparse import csr_matrix
+
+
+def magnetic_laplacian(g, q=0.25):
+    """
+    Compute the magnetic Laplacian for a directed graph `g`.
+    
+    Parameters:
+    - g: networkx.DiGraph
+        A directed graph.
+    - q: float
+        Magnetic flux parameter (normalized, typically in [0, 1]).
+
+    Returns:
+    - Magnetic Laplacian as a sparse matrix.
+    """
     def exp_theta_i(A, q):
         return np.exp(2 * np.pi * q * 1j * (A - A.T))
-
-    A_symmetric = nx.adjacency_matrix(g.to_undirected()).toarray()
-    A_directed = nx.adjacency_matrix(g).toarray()
+    A_directed = nx.to_pandas_adjacency(g, nodelist=sorted(g.nodes))
+    A_symmetric = A_directed + A_directed.T
     D_s = np.diag(np.sum(A_symmetric, axis=1))
     asymmetric_element = exp_theta_i(A_directed, q)
     laplacian = D_s - np.multiply(asymmetric_element, A_symmetric)
-
-    # Check if the real part is very close to zero and set it to zero
-    laplacian_real = np.real(laplacian)
-    laplacian_real[np.abs(laplacian_real) < tolerance] = 0
-
-    # Check if the imaginary part is very close to zero and set it to zero
-    laplacian_img = np.imag(laplacian)
-    laplacian_img[np.abs(laplacian_img) < tolerance] = 0  
-      
-    # Reconstruct the complex array with the updated real part and original imaginary part
-    laplacian = laplacian_real + 1j * laplacian_img
     return laplacian
-
-
 
 
 
@@ -32,9 +33,9 @@ def magL_eigenvectors(MagL):
     _, eig_vecs = np.linalg.eig(MagL)
     return eig_vecs
 
-
-def magnetic_laplacian_eigenvectors(g, max_seq_len, q=0.25, tolerance=1e-5):
-    MagL = magnetic_laplacian(g=g, q = q, tolerance= tolerance)
+#TODO: change 1 to 1/1000
+def magnetic_laplacian_eigenvectors(g, max_seq_len, q=1e-2):
+    MagL = magnetic_laplacian(g=g, q = q)
     vec = magL_eigenvectors(MagL)
     vec = pad_and_concat_eigenvectors(vec, max_seq_len)
     return vec
