@@ -780,7 +780,7 @@ def positional_encoding(
     return encoding
 
 
-def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
+def create_indexing_map(sentence: str, tokenizer):
     tokens = sentence.split()
     ids = tokenizer.encode(sentence)
     subtokens = [tokenizer.decode(id) for id in ids]
@@ -788,23 +788,23 @@ def create_indexing_map(sentence: str, tokenizer) -> Dict[int, List[int]]:
     index_map = {}
     subtoken_index = 0
     
+    
     for i, token in enumerate(tokens):
         subtokens_for_token = []
         token_length = 0
         current_subtoken = ""
+        internal_subtoken_index = 0
 
         while token_length < len(strip_string(token)):
-            subtokens_for_token.append(subtoken_index)
-            try:
-                token_length += len(strip_string(subtokens[subtoken_index]))
-                current_subtoken += subtokens[subtoken_index]    
-            except IndexError:
-                subtoken_map = {i: subtoken for i, subtoken in enumerate(subtokens)}
-                token_map = {i: token for i, token in enumerate(tokens)}
-                raise ValueError(f"\n sentence: {sentence} \n subtokens: {subtoken_map}\n token: {token} \n subtoken_index: {subtoken_index}  \n tokens: {token_map}  \n subtokens for token {subtokens_for_token} \n index map {index_map}"  )
+            subtokens_for_token.append(internal_subtoken_index)
+            internal_subtoken_index += 1
+            token_length += len(strip_string(subtokens[subtoken_index]))
+            current_subtoken += subtokens[subtoken_index]    
             subtoken_index += 1
         if strip_string(token) != strip_string(current_subtoken):
-            raise ValueError(f"Token {token} does not match subtokens {current_subtoken}")
+            raise ValueError(
+                f"Tokenization mismatch: {token} != {current_subtoken}"
+            )
         index_map[i] = subtokens_for_token
 
     return index_map
@@ -819,7 +819,9 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
         indexing_map = {i: [i] for i in range(len(eigvecs))}
     else:
          indexing_map = create_indexing_map(sentence, tokenizer)
+    print(indexing_map)    
     subtoken_eigvecs = []
+    global_subtoken_index = 0
     for i, eigvec in enumerate(eigvecs):
         subtoken_indices = indexing_map[i]
         subtoken_eigvecs.extend([eigvec] * len(subtoken_indices))
@@ -827,9 +829,11 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
             sinousoidal_encoding = positional_encoding(subtoken_index)
 
             # concatenate the eigenvector with the positional encoding
-            subtoken_eigvecs[subtoken_index] = np.concatenate(
+            subtoken_eigvecs[global_subtoken_index] = np.concatenate(
                 (eigvec, sinousoidal_encoding)
             )
+            global_subtoken_index += 1
+  
 
     return np.array(subtoken_eigvecs)
 
