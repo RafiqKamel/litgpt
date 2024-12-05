@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from litgpt.special_tokens import new_tokens_amr
+new_tokens_amr = []
 from typing import Optional, Union, Iterable, Iterator
 
 import torch
