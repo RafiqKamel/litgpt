@@ -736,6 +736,10 @@ def resize_model_vocabulary_size(model, new_vocabulary_size):
     old_vocab_size = model.config.padded_vocab_size
     embedding_dim = model.config.n_embd
     old_embeddings = model.get_embeddings()
+    
+    if new_vocabulary_size == old_vocab_size:
+        print("The vocabulary size is already the same as the new vocabulary size.")
+        return 
 
     # Assuming `old_vocab_size` and `embedding_dim` are defined as in previous examples
     new_embeddings = torch.zeros((new_vocabulary_size, embedding_dim))
@@ -818,8 +822,7 @@ def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
     if len(eigvecs) == len(tokenizer.encode(sentence)):
         indexing_map = {i: [i] for i in range(len(eigvecs))}
     else:
-         indexing_map = create_indexing_map(sentence, tokenizer)
-    print(indexing_map)    
+         indexing_map = create_indexing_map(sentence, tokenizer)  
     subtoken_eigvecs = []
     global_subtoken_index = 0
     for i, eigvec in enumerate(eigvecs):
@@ -938,3 +941,16 @@ def check_nvlink_connectivity(fabric=None):
 
         except Exception as e:
             custom_print(f"An error occurred: {e}")
+
+
+def update_positional_mlp_lr(optimizer, model, target_module_name='positional_encoding_mlp', new_lr=1e-2):
+    for name, param in model.named_parameters():
+        if target_module_name in name:
+            # Identify the correct param group for this parameter
+            for param_group in optimizer.param_groups:
+                if param in param_group['params']:
+                    print(f"Setting LR for {target_module_name} in param group: {param_group}")
+                    param_group['lr'] = new_lr
+                    break  # Exit once you've updated the correct param group
+        else:
+            print(f"Parameter {name} not in {target_module_name}, skipping...")
