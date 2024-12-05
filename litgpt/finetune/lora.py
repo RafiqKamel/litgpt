@@ -28,7 +28,6 @@ from litgpt.scripts.merge_lora import merge_lora
 from litgpt.utils import recreate_graph
 from litgpt.magnetic_laplacian_utils import magnetic_laplacian_eigenvectors
 from litgpt.tokenizer import Tokenizer
-from litgpt.special_tokens import new_tokens_amr
 from litgpt.utils import (
     auto_download_checkpoint,
     check_nvlink_connectivity,
@@ -47,6 +46,7 @@ from litgpt.utils import (
     save_hyperparameters,
     resize_model_vocabulary_size,
     process_eigenvectors_subtokens,
+    update_positional_mlp_lr
 )
 
 
@@ -242,7 +242,6 @@ def main(
     )
 
     model = fabric.setup_module(model)
-
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
         optimizer = instantiate_bnb_optimizer(optimizer, model.parameters())
     else:
@@ -261,6 +260,7 @@ def main(
     set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size, layer=model.transformer.wte, layer_name="transformer.wte")
     set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1  - old_vocab_size, layer=model.lm_head.linear, layer_name="lm_head.linear")
     print("model size is (right after resizing): ", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
+    update_positional_mlp_lr(model=model, new_lr=1e-3, optimizer=optimizer, target_module_name="positional_encoding_mlp")
     train_time = time.perf_counter()
     fit(
         fabric,
@@ -368,7 +368,6 @@ def fit(
     iter_num = 0
     total_lengths = 0
     total_t0 = time.perf_counter()
-
     while step_count < max_steps and train_iterator.epoch < train.epochs:
         iter_num += 1
         iter_t0 = time.perf_counter()
@@ -539,17 +538,19 @@ def generate_example(
 
 def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, batch_size: int, base_batch_size = 64):
     # Scale learning rate based on batch size
-    scaling_factor = batch_size / base_batch_size
-    initial_lr = optimizer.param_groups[0]['lr']
-    scaled_lr = initial_lr * scaling_factor
+    #scaling_factor = batch_size / base_batch_size#
+    #initial_lr = optimizer.param_groups[0]['lr']
+    #scaled_lr = initial_lr * scaling_factor
 
-    # Update optimizer's learning rate with scaled value
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = scaled_lr
+    # # Update optimizer's learning rate with scaled value
+    # TODO: set the learning before the optimizer is created
+    # for param_group in optimizer.param_groups:
+    #     param_group['lr'] = scaled_lr
 
     # Define the warmup and cosine annealing schedulers
     scheduler1 = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda step: (step / warmup_steps) * scaling_factor
+        optimizer, lambda step: (step / warmup_steps) 
+        # * scaling_factor
     )
     scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=(max_steps - warmup_steps)
