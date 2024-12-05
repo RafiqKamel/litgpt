@@ -591,12 +591,22 @@ class RMSNorm(torch.nn.Module):
 class PositionalEncodingMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, output_dim)
+        self.fc1 = nn.Linear(input_dim, output_dim * 2)
         self.act = nn.GELU()
-        self.fc2 = nn.Linear(output_dim, output_dim)
+        self.fc2 = nn.Linear(output_dim * 2, output_dim * 2)
+        self.fc3 = nn.Linear(output_dim * 2, output_dim)
+        self.scale = nn.Parameter(torch.tensor(1.0))  # Learnable scaling factor
+        self.residual_proj = nn.Linear(input_dim, output_dim)
+        self.ln = nn.LayerNorm(output_dim)
 
     def forward(self, x):
+        print("scale value: ",self.scale.item(), "scale grad",self.scale.grad)
+        residual = self.residual_proj(x)
         x = self.fc1(x)
         x = self.act(x)
         x = self.fc2(x)
+        x = self.act(x)
+        x = self.fc3(x)
+        x = self.ln(x)
+        x = x * self.scale  # Apply learned scaling factor
         return x
