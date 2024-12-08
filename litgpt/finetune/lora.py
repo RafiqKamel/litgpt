@@ -590,6 +590,7 @@ def get_dataloaders(
     fabric: L.Fabric, data: DataModule, tokenizer: Tokenizer, train: TrainArgs
 ) -> Tuple[DataLoader, DataLoader]:
     data.connect(
+        direction=train.direction,
         tokenizer=tokenizer,
         batch_size=train.micro_batch_size,
         max_seq_length=train.max_seq_length,
