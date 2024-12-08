@@ -41,7 +41,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.cli import instantiate_class
 from torch.serialization import normalize_storage_type
 from typing_extensions import Self
-from litgpt.new_utils import add_prefix_to_dict_keys
+
 
 if TYPE_CHECKING:
     from litgpt import GPT, Config
@@ -432,23 +432,11 @@ def get_default_supported_precision(training: bool) -> str:
 
 
 def load_checkpoint(
-    fabric: L.Fabric,
-    model: nn.Module,
-    checkpoint_path: Path,
-    strict: bool = True,
-    load_pos_encodings_weights: bool = False,
+    fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True
 ) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
-        if load_pos_encodings_weights:
-            state_dict_positional = lazy_load(
-                checkpoint_path.parent / "pos_encoding_weights.pth"
-            )
-            state_dict_positional = add_prefix_to_dict_keys(
-                state_dict_positional, "positional_encoding_mlp."
-            )
-            state_dict.update(state_dict_positional)
         state_dict = lazy_load(checkpoint_path)
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
