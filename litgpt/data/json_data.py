@@ -81,6 +81,7 @@ class JSON(DataModule):
             ignore_index=self.ignore_index,
         )
         self.test_dataset = SFTDataset(
+            direction=direction,
             data=test_data,
             tokenizer=self.tokenizer,
             prompt_style=self.prompt_style,
