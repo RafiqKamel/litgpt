@@ -135,7 +135,7 @@ class SFTDataset(Dataset):
             eig_vecs, len_starting_token_ids, starting_token_ids = (
                 prepare_eigvecs_datapoint(
                     tokenizer=self.tokenizer,
-                    graph_str=example["graph"],
+                    graph_str=example["graph_str"],
                     sentence=example["instruction"],
                     prompt_style=self.prompt_style,
                     max_seq_length=self.max_seq_length,
