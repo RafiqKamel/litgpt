@@ -125,7 +125,13 @@ class Llama2FunctionCalling(PromptStyle):
                 "Search the web for content on Bing. This allows users to search online/the internet/the web for"
                 " content."
             ),
-            "arguments": [{"name": "query", "type": "string", "description": "The search query string"}],
+            "arguments": [
+                {
+                    "name": "query",
+                    "type": "string",
+                    "description": "The search query string",
+                }
+            ],
         }
 
         system_prompt = (
@@ -164,9 +170,9 @@ class Llama3(PromptStyle):
         if isinstance(prompt, str):
             return (
                 "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                f"{default_system_prompt}<|eot_id|>" # No newline
+                f"{default_system_prompt}<|eot_id|>"  # No newline
                 "<|start_header_id|>user<|end_header_id|>\n\n"
-                f"{prompt}<|eot_id|>" # No newline
+                f"{prompt}<|eot_id|>"  # No newline
                 "<|start_header_id|>assistant<|end_header_id|>\n\n"
             )
         elif isinstance(prompt, list):
@@ -182,16 +188,24 @@ class Llama3(PromptStyle):
                 return tokens
 
             def has_system_prompt(messages: List[Dict[str, str]]) -> bool:
-                return messages[0].get("role", "") == "system" if len(messages) else False
+                return (
+                    messages[0].get("role", "") == "system" if len(messages) else False
+                )
 
             tokens = ["<|begin_of_text|>"]
             if not has_system_prompt(prompt):
-                tokens.extend(encode_message({"role": "system", "content": default_system_prompt}))
+                tokens.extend(
+                    encode_message({"role": "system", "content": default_system_prompt})
+                )
             for i, message in enumerate(prompt):
                 if i != 0 and message["role"] == "system":
-                    raise ValueError("'system' role is only allowed at the beginning of the conversation list.")
+                    raise ValueError(
+                        "'system' role is only allowed at the beginning of the conversation list."
+                    )
                 if not message["role"] in ["assistant", "user", "system"]:
-                    raise ValueError(f"Unknown role: '{message['role']}'. Supported roles are 'assistant', 'user', and 'system'.")
+                    raise ValueError(
+                        f"Unknown role: '{message['role']}'. Supported roles are 'assistant', 'user', and 'system'."
+                    )
                 tokens.extend(encode_message(message))
             tokens.extend(encode_header("assistant"))
             return "".join(tokens)
@@ -218,6 +232,7 @@ class FreeWilly2(PromptStyle):
 class Platypus(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"### Instruction:\n\n{prompt}\n\n### Response:\n"
+
 
 class StableCode(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
@@ -255,7 +270,7 @@ class Phi2(PromptStyle):
 
 class Phi3(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
-        return f'<|system|>\nYou are a helpful assistant.<|end|>\n<|user|>\n{prompt}<|end|>\n<|assistant|>\n'
+        return f"<|system|>\nYou are a helpful assistant.<|end|>\n<|user|>\n{prompt}<|end|>\n<|assistant|>\n"
 
 
 class TinyLlama(PromptStyle):
@@ -277,11 +292,13 @@ class Gemma(PromptStyle):
 class OLMo(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"<|endoftext|><|user|>\n{prompt}\n<|assistant|>\n"
-    
+
 
 class Qwen2_5(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
-        system_message = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+        system_message = (
+            "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+        )
         return f"<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
@@ -290,10 +307,27 @@ class QwQ(PromptStyle):
         system_message = "You are a helpful and harmless assistant. You are Qwen developed by Alibaba. You should think step-by-step."
         return f"<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
+
 class Salamandra(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         system_message = "I am Salamandra, an AI language model developed at the Barcelona Supercomputing Centre (BSC) by the Language Technologies Unit. My knowledge base was last updated on August 2023. Today Date: 2024-09-30\nSoy Salamandra, un modelo lingüístico de IA desarrollado en el Barcelona Supercomputing Centre (BSC) por la Language Technologies Unit. Mi base de conocimientos se actualizó por última vez en agosto de 2023.\nSoc Salamandra, un model de llenguatge d'IA desenvolupat al Barcelona Supercomputing Centre (BSC) per la Language Technologies Unit. La meva base de coneixement es va actualitzar per última vegada l'agost de 2023."
         return f"<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+
+
+class AMR2Text(PromptStyle):
+    def name(self) -> str:
+        return "amr2text"
+
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<AMR>{prompt}<text>"
+
+
+class Text2AMR(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<text>{prompt}<AMR>"
+
+    def name(self) -> str:
+        return "text2amr"
 
 
 # Maps prompt style names to PromptStyle classes
@@ -322,6 +356,8 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "qwen2.5": Qwen2_5,
     "qwq": QwQ,
     "salamandra": Salamandra,
+    "amr2text": AMR2Text,
+    "text2amr": Text2AMR,
 }
 
 
