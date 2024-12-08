@@ -4,6 +4,10 @@ from litgpt.positional_encodings_config import (
     sinousidial_encodings_q,
     sinousidial_encodings_dim,
 )
+from litgpt.magentic_laplacian_utils import (
+    magnetic_laplacian,
+    magnetic_laplacian_eigenvectors,
+)
 import torch
 import yaml
 import unicodedata
@@ -149,3 +153,31 @@ def create_edge_list_sequence(n_tokens):
     for i in range(n_tokens - 1):
         edge_list += f"{i} {i+1}\n"
     return edge_list
+
+
+def prepare_eigvecs_datapoint(
+    tokenizer, graph_str, sentence, prompt_style, max_seq_length
+):
+    G = recreate_graph(edge_list_str=graph_str)
+    eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_length=max_seq_length)
+    subtoken_eigvecs = process_eigenvectors_subtokens(
+        tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs
+    )
+    if type(prompt_style) == str:
+        if prompt_style == "amr2text":
+            starting_token_ids = tokenizer.encode("<AMR>")
+        elif prompt_style == "text2amr":
+            starting_token_ids = tokenizer.encode("<text>")
+        else:
+            starting_token_ids = []
+            print("Error: Unknown prompt style", prompt_style)
+    else:
+        if prompt_style.name() == "amr2text":
+            starting_token_ids = tokenizer.encode("<AMR>")
+        elif prompt_style.name() == "text2amr":
+            starting_token_ids = tokenizer.encode("<text>")
+        else:
+            starting_token_ids = []
+            print("Error: Unknown prompt style", prompt_style)
+    len_starting_token_ids = len(starting_token_ids)
+    return subtoken_eigvecs, len_starting_token_ids, starting_token_ids

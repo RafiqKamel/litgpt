@@ -10,6 +10,8 @@ from torch.utils.data import Dataset
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
+import unidecode
+from litgpt.new_utils import prepare_eigvecs_datapoint
 
 
 class DataModule(LightningDataModule):
@@ -95,6 +97,8 @@ class SFTDataset(Dataset):
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)
+        example["instruction"] = unidecode(example["instruction"])
+        example["output"] = unidecode(example["output"])
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
@@ -121,6 +125,35 @@ class SFTDataset(Dataset):
             )
         ) + len(encoded_response)
 
+        if "eigvecs" in example:
+            eig_vecs, len_starting_token_ids, starting_token_ids = (
+                example["eigvecs"],
+                example["len_starting_token_ids"],
+                example["starting_token_ids"],
+            )
+        else:
+            eig_vecs, len_starting_token_ids, starting_token_ids = (
+                prepare_eigvecs_datapoint(
+                    tokenizer=self.tokenizer,
+                    graph_str=example["graph"],
+                    sentence=example["instruction"],
+                    prompt_style=self.prompt_style,
+                    max_seq_length=self.max_seq_length,
+                )
+            )
+            example["eigvecs"] = eig_vecs
+            example["len_starting_token_ids"] = len_starting_token_ids
+            example["starting_token_ids"] = starting_token_ids
+
+        if len_starting_token_ids != 0:
+            # check that the starting token ids are the same as the ones used in the prompt
+            if not torch.equal(
+                encoded_prompt[:len_starting_token_ids], starting_token_ids
+            ):
+                raise ValueError(
+                    f"Starting token ids do not match: {encoded_prompt[:len_starting_token_ids]} != {starting_token_ids}"
+                )
+
         return {
             "input_ids": encoded_prompt_and_response,
             "labels": labels,
@@ -128,6 +161,8 @@ class SFTDataset(Dataset):
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
             },
+            "eigvecs": eig_vecs,
+            "len_starting_token_ids": len_starting_token_ids,
         }
 
 
