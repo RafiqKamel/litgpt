@@ -17,7 +17,10 @@ class DataModule(LightningDataModule):
 
     @abstractmethod
     def connect(
-        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None
+        self,
+        tokenizer: Optional[Tokenizer] = None,
+        batch_size: int = 1,
+        max_seq_length: Optional[int] = None,
     ) -> None:
         """All settings that can't be determined at the time of instantiation need to be passed through here
         before any dataloaders can be accessed.
@@ -56,15 +59,29 @@ class SFTDataset(Dataset):
         data: List[Dict[str, str]],
         tokenizer: Tokenizer,
         prompt_style: Union[str, PromptStyle],
+        direction: str,
         max_seq_length: int = -1,
         mask_prompt: bool = True,
         ignore_index: int = -100,
         transform: Optional[Callable[[Any], Any]] = None,
     ) -> None:
+        prompt_style = (
+            "amr2text"
+            if direction == "amr2text"
+            else "text2amr" if direction == "text2amr" else prompt_style
+        )
+        print("prompt_style", prompt_style)
+        self.prompt_style = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
+        )
         self.data = data
         self.tokenizer = tokenizer
         self.prompt_style = (
-            prompt_style if isinstance(prompt_style, PromptStyle) else PromptStyle.from_name(prompt_style)
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
         )
         self.max_seq_length = max_seq_length
         self.mask_prompt = mask_prompt
@@ -80,17 +97,29 @@ class SFTDataset(Dataset):
             example = self.transform(example)
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
-        encoded_response = self.tokenizer.encode(example["output"], bos=False, eos=True, max_length=self.max_seq_length)
-        encoded_prompt_and_response = torch.cat((encoded_prompt, encoded_response)).type(torch.int64)
-        if self.max_seq_length > 0:  # do not slice off last token when self.max_seq_length = -1
-            encoded_prompt_and_response = encoded_prompt_and_response[: self.max_seq_length]
+        encoded_response = self.tokenizer.encode(
+            example["output"], bos=False, eos=True, max_length=self.max_seq_length
+        )
+        encoded_prompt_and_response = torch.cat(
+            (encoded_prompt, encoded_response)
+        ).type(torch.int64)
+        if (
+            self.max_seq_length > 0
+        ):  # do not slice off last token when self.max_seq_length = -1
+            encoded_prompt_and_response = encoded_prompt_and_response[
+                : self.max_seq_length
+            ]
 
         # The labels are the full prompt with response, but with the prompt masked out
         labels = encoded_prompt_and_response.clone()
         if self.mask_prompt:
             labels[: len(encoded_prompt)] = self.ignore_index
 
-        raw_token_count = len(self.tokenizer.encode(example["instruction"], max_length=self.max_seq_length)) + len(encoded_response)
+        raw_token_count = len(
+            self.tokenizer.encode(
+                example["instruction"], max_length=self.max_seq_length
+            )
+        ) + len(encoded_response)
 
         return {
             "input_ids": encoded_prompt_and_response,
@@ -98,22 +127,32 @@ class SFTDataset(Dataset):
             "token_counts": {
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
-            }
+            },
         }
 
 
-def get_sft_collate_fn(max_seq_length: int = -1, pad_id: int = 0, ignore_index: int = -100):
+def get_sft_collate_fn(
+    max_seq_length: int = -1, pad_id: int = 0, ignore_index: int = -100
+):
     """Returns the collate function for supervised finetuning (needed in the DataLoader).
 
     The collate function gets a list of dicts with keys `input_ids` and `labels`.
     It returns a dict with batched `input_ids` and `labels`. Also pads short sequences to the longest element in
     the batch. Optionally truncates all sequences to the specified maximum length.
     """
-    return partial(_sft_collate_fn, max_seq_length=max_seq_length, pad_id=pad_id, ignore_index=ignore_index)
+    return partial(
+        _sft_collate_fn,
+        max_seq_length=max_seq_length,
+        pad_id=pad_id,
+        ignore_index=ignore_index,
+    )
 
 
 def _sft_collate_fn(
-    samples: List[Dict[str, Tensor]], max_seq_length: int = -1, pad_id: int = 0, ignore_index: int = -100
+    samples: List[Dict[str, Tensor]],
+    max_seq_length: int = -1,
+    pad_id: int = 0,
+    ignore_index: int = -100,
 ) -> Dict[str, Tensor]:
 
     batched = {}
@@ -122,7 +161,9 @@ def _sft_collate_fn(
 
         # Pad right based on the longest sequence
         batched[key] = torch.nn.utils.rnn.pad_sequence(
-            [sample[key] for sample in samples], batch_first=True, padding_value=pad_value
+            [sample[key] for sample in samples],
+            batch_first=True,
+            padding_value=pad_value,
         )
 
         # Truncate if needed
@@ -130,11 +171,16 @@ def _sft_collate_fn(
             batched[key] = batched[key][:, :max_seq_length]
 
     batched["token_counts"] = {}
-    batched["token_counts"]["raw"] = torch.tensor(  # Token count without padding and without prompt template
-        [sample["token_counts"]["raw"] for sample in samples], dtype=torch.int64
-    ).unsqueeze(1)
-    batched["token_counts"]["raw_plus_prompt_template"] = torch.tensor(  # Token count without padding but with prompt template
-        [sample["token_counts"]["raw_plus_prompt_template"] for sample in samples], dtype=torch.int64
-    ).unsqueeze(1)
+    batched["token_counts"]["raw"] = (
+        torch.tensor(  # Token count without padding and without prompt template
+            [sample["token_counts"]["raw"] for sample in samples], dtype=torch.int64
+        ).unsqueeze(1)
+    )
+    batched["token_counts"]["raw_plus_prompt_template"] = (
+        torch.tensor(  # Token count without padding but with prompt template
+            [sample["token_counts"]["raw_plus_prompt_template"] for sample in samples],
+            dtype=torch.int64,
+        ).unsqueeze(1)
+    )
 
     return batched
