@@ -191,15 +191,14 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels"):
+    for key in ("input_ids", "labels", "eigvecs", "len_starting_token_ids"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
-        # Pad right based on the longest sequence
         batched[key] = torch.nn.utils.rnn.pad_sequence(
             [sample[key] for sample in samples],
             batch_first=True,
             padding_value=pad_value,
-        )
+        ) if key not in ["len_starting_token_ids", "eigvecs"] else torch.tensor([sample[key] for sample in samples])    
 
         # Truncate if needed
         if max_seq_length > 0:
