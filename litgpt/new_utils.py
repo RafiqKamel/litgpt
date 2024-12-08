@@ -181,3 +181,25 @@ def prepare_eigvecs_datapoint(
             print("Error: Unknown prompt style", prompt_style)
     len_starting_token_ids = len(starting_token_ids)
     return subtoken_eigvecs, len_starting_token_ids, starting_token_ids
+
+
+def update_positional_mlp_lr(
+    optimizer, model, target_module_name="positional_encoding_mlp", new_lr=1e-2
+):
+    updated_groups = 0  # Track updates for logging or debugging
+    for name, param in model.named_parameters():
+        if target_module_name in name:
+            for param_group in optimizer.param_groups:
+                # Correct way to check if `param` is in the parameter group
+                if any(p is param for p in param_group["params"]):
+                    print(f"Setting LR for {name} in param group")
+                    param_group["lr"] = new_lr
+                    updated_groups += 1
+                    break
+        else:
+            pass  # Reduce verbose output
+
+    if updated_groups == 0:
+        print(
+            f"No parameter groups were updated. Check if {target_module_name} is correct."
+        )
