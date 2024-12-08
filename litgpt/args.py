@@ -36,6 +36,8 @@ class TrainArgs:
     direction: str = None
     """amr2text or text2amr"""
 
+    mlp_lr: float = 1e-2
+
     # Optimization args
     max_norm: Optional[float] = None
     min_lr: float = 6e-5
