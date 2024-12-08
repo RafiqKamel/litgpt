@@ -184,7 +184,7 @@ def prepare_eigvecs_datapoint(
 
 
 def update_positional_mlp_lr(
-    optimizer, model, target_module_name="positional_encoding_mlp", new_lr=1e-2
+    optimizer, model, new_lr=1e-2, target_module_name="positional_encoding_mlp"
 ):
     updated_groups = 0  # Track updates for logging or debugging
     for name, param in model.named_parameters():
@@ -203,3 +203,12 @@ def update_positional_mlp_lr(
         print(
             f"No parameter groups were updated. Check if {target_module_name} is correct."
         )
+
+
+def mark_MLP_for_finetuning(model, target_module_name="positional_encoding_mlp"):
+    for name, param in model.named_parameters():
+        if target_module_name in name:
+            print(f"Marking {name} for finetuning")
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
