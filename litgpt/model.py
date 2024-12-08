@@ -112,6 +112,7 @@ class GPT(nn.Module):
             mask = None
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        eig_vecs = eig_vecs / eig_vecs.norm(dim=-1, keepdim=True)
         positional_encodings = self.positional_encoding_mlp(eig_vecs)
         # normalize the positional encoding
         positional_encodings = positional_encodings / positional_encodings.norm(
@@ -125,7 +126,10 @@ class GPT(nn.Module):
             end_idx = (
                 start_idx + positional_encodings.shape[1]
             )  # Calculate the end index based on pos_encodings length
-            x[i, start_idx:end_idx, :] += positional_encodings[i]
+            if x.shape[1] >= end_idx - start_idx:
+                x[i, start_idx:end_idx, :] += positional_encodings[i]
+            else:
+                print("Warning: Sequence length is less than the positional encodings")
         if self.config.scale_embeddings:
             x = x * torch.tensor(self.config.n_embd**0.5, dtype=x.dtype)
 
