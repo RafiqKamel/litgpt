@@ -604,6 +604,7 @@ class GPT(BaseModel):
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
 
+        eig_vecs = eig_vecs / torch.norm(eig_vecs, dim=-1, keepdim=True)
         positional_encodings = self.positional_encoding_mlp(eig_vecs)
         # normalize the positional encoding
         positional_encodings = positional_encodings / positional_encodings.norm(
