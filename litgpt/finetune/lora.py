@@ -43,7 +43,12 @@ from litgpt.utils import (
     save_hyperparameters,
     select_sft_generate_example,
 )
-from litgpt.new_utils import update_positional_mlp_lr, mark_MLP_for_finetuning
+from litgpt.new_utils import (
+    update_positional_mlp_lr,
+    mark_MLP_for_finetuning,
+    prepare_eigvecs_datapoint,
+)
+from litgpt.prompts import PromptStyle
 
 
 def setup(
@@ -209,6 +214,7 @@ def main(
     optimizer: Union[str, Dict],
 ) -> None:
     validate_args(train, eval)
+    eval.direction = train.direction
 
     tokenizer = Tokenizer(checkpoint_dir)
     train_dataloader, val_dataloader = get_dataloaders(fabric, data, tokenizer, train)
@@ -513,11 +519,31 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction = select_sft_generate_example(eval, data)
-
+    instruction = "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
+    graph_text = "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
     fabric.print(instruction)
-    prompt = data.prompt_style.apply(instruction)
+    prompt_style = eval.direction
+    prompt_style_object = (
+        prompt_style
+        if isinstance(prompt_style, PromptStyle)
+        else PromptStyle.from_name(prompt_style)
+    )
+    prompt = prompt_style_object.apply(instruction)
+    instruction = select_sft_generate_example(eval, data)
     encoded = tokenizer.encode(prompt, device=fabric.device)
+    eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
+        graph_str=graph_text,
+        tokenizer=tokenizer,
+        sentence=instruction,
+        max_seq_length=model.max_seq_length,
+        prompt_style=prompt_style,
+    )
+    if not torch.equal(encoded[:len_starting_token_ids], starting_tokens):
+        raise ValueError(
+            "The starting tokens in the instruction do not match the starting tokens in the graph",
+            starting_tokens,
+            encoded[: len_starting_token_ids + 4],
+        )
     model.eval()
 
     max_returned_tokens = len(encoded) + eval.max_new_tokens
@@ -532,6 +558,8 @@ def generate_example(
             max_returned_tokens=max_returned_tokens,
             temperature=0.8,
             eos_id=tokenizer.eos_id,
+            eig_vec=eig_vec,
+            len_starting_token_ids=len_starting_token_ids,
         )
         model.clear_kv_cache()
         model.train()
