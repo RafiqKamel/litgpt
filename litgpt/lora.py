@@ -60,7 +60,6 @@ from litgpt.model import Block as BaseBlock
 from litgpt.model import CausalSelfAttention as BaseCausalSelfAttention
 from litgpt.model import KVCache
 from litgpt.utils import map_old_state_dict_weights
-from litgpt.special_tokens import new_tokens_amr
 from litgpt.positional_encodings_config import sinousidial_encodings_dim
 
 class LoRALayer(nn.Module):
@@ -654,6 +653,7 @@ class GPT(BaseModel):
         self,
         idx: torch.Tensor,
         eig_vecs: torch.Tensor,
+        len_starting_token,
         input_pos: Optional[torch.Tensor] = None,
         lm_head_chunk_size: int = 0,
     ) -> Union[torch.Tensor, List[torch.Tensor]]:
@@ -674,18 +674,27 @@ class GPT(BaseModel):
             mask = None  
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)   
         # Process eigenvectors through the MLP to get positional encodings
+        print("Eigenvectors Shape:", eig_vecs.shape)
         if eig_vecs is not None:
             eig_vecs = eig_vecs.to(self.device)
+            #TODO normalize the inputs eigenvectors before passing them to the MLP
+            #eig_vecs = eig_vecs / torch.norm(eig_vecs, dim=-1, keepdim=True)
             pos_encodings = self.positional_encoding_mlp(eig_vecs.to(dtype=torch.float32))
         else:
             print("eigen vectors passed is None")
             pos_encodings = torch.zeros((x.shape[0], x.shape[1]-1, x.shape[2])).to(self.device)      
-        #pos_encodings = pos_encodings / torch.norm(pos_encodings, dim=-1, keepdim=True)
+        pos_encodings = pos_encodings / torch.norm(pos_encodings, dim=-1, keepdim=True)
         #print magnitude of x and of pos_encodings
+        print("len starting token shape", len_starting_token.shape)
+        print("x shape",x.shape)
+        print("pos encodings shape",pos_encodings.shape)
         print("Token Embeddings Norm:", torch.norm(x, dim=-1).mean().item())
         print("Positional Encodings Norm:", torch.norm(pos_encodings, dim=-1).mean().item())
         #shifting the pos_encodings to the right by 1 to account for the added <AMR> token   
-        x[:, 1:pos_encodings.shape[1]+1, :] += pos_encodings 
+        # for i in range(x.shape[0]):  # Iterate over each batch
+        #     start_idx = len_starting_token[i]  # Get the starting token index for the i-th batch
+        #     end_idx = start_idx + pos_encodings.shape[1]  # Calculate the end index based on pos_encodings length
+        #     x[i, start_idx:end_idx, :] += pos_encodings[i]
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
