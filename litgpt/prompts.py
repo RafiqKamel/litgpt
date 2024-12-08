@@ -337,11 +337,15 @@ class Gemma(PromptStyle):
 
 
 class AMR2Text(PromptStyle):
+    def name(self) -> str:
+        return "amr2text"
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"<AMR>{prompt}<text>"
 class Text2AMR(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"<text>{prompt}<AMR>"
+    def name(self) -> str:
+        return "text2amr"
 
 class H2Oai(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
