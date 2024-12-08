@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
-import unidecode
+from unidecode import unidecode
 from litgpt.new_utils import prepare_eigvecs_datapoint
 
 
