@@ -504,7 +504,9 @@ def validate(
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        logits = model(input_ids)
+        eig_vecs = batch["eigvecs"]
+        len_starting_token_ids = batch["len_starting_token_ids"]
+        logits = model(input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids)
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )
