@@ -62,16 +62,17 @@ class JSON(DataModule):
             self.prompt_style = PromptStyle.from_name(self.prompt_style)
 
     def connect(
-        self, direction: str,tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None
+        self, tokenizer: Optional[Tokenizer] = None, batch_size: int = 1, max_seq_length: Optional[int] = None
     ) -> None:
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.max_seq_length = -1 if max_seq_length is None else max_seq_length
 
-    def setup(self, stage: str = "") -> None:
+    def setup(self, direction: str,stage: str = "") -> None:
         train_data, test_data = self.get_splits()
 
         self.train_dataset = SFTDataset(
+            direction=direction,
             data=train_data,
             tokenizer=self.tokenizer,
             prompt_style=self.prompt_style,

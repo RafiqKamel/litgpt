@@ -590,14 +590,13 @@ def get_dataloaders(
     fabric: L.Fabric, data: DataModule, tokenizer: Tokenizer, train: TrainArgs
 ) -> Tuple[DataLoader, DataLoader]:
     data.connect(
-        direction=train.direction,
         tokenizer=tokenizer,
         batch_size=train.micro_batch_size,
         max_seq_length=train.max_seq_length,
     )
     with fabric.rank_zero_first():
         data.prepare_data()
-    data.setup()
+    data.setup(direction=train.direction)
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
     train_dataloader, val_dataloader = fabric.setup_dataloaders(
