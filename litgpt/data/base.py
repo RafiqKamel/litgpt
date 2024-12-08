@@ -136,14 +136,30 @@ class SFTDataset(Dataset):
                 eig_vec = magnetic_laplacian_eigenvectors(graph, self.max_seq_length)
                 eig_vec = process_eigenvectors_subtokens(eigvecs=eig_vec, sentence=example["instruction"], tokenizer=self.tokenizer)
                 self.data[idx]["eig_vec"] = eig_vec     
-        
-        starting_token_id = self.tokenizer.encode("<AMR>") if prompt == "amr2text" else self.tokenizer.encode("<text>")
-        if torch.equal(encoded_prompt_and_response[:2], torch.tensor([2, starting_token_id])):
-            encoded_prompt_and_response[:2] = torch.tensor([starting_token_id, 2])
+        if type(self.prompt_style) == str:
+            if self.prompt_style == "amr2text":
+                starting_token_ids = self.tokenizer.encode("<AMR>")
+            elif self.prompt_style == "text2amr":
+                starting_token_ids = self.tokenizer.encode("<text>")
+            else:
+                raise Exception("Error: Unknown prompt style", self.prompt_style)        
+        else:          
+            if self.prompt_style.name()=="amr2text":
+                starting_token_ids = self.tokenizer.encode("<AMR>")
+            elif self.prompt_style.name()=="text2amr":
+                starting_token_ids = self.tokenizer.encode("<text>")            
+            else:
+                raise Exception("Error: Unknown prompt style", self.prompt_style)
+        len_starting_token_ids = len(starting_token_ids)
+        if torch.equal(encoded_prompt_and_response[:len_starting_token_ids+1], torch.tensor([2] + list(starting_token_ids))):
+            encoded_prompt_and_response[:len_starting_token_ids+1] = torch.tensor(list(starting_token_ids)+ [2])
+        elif not torch.equal(encoded_prompt_and_response[:len_starting_token_ids], torch.tensor(list(starting_token_ids))):  
+            print("Warning: Starting token ids do not match", [(token, self.tokenizer.decode(torch.tensor([token]))) for i, token in enumerate(encoded_prompt_and_response[:len_starting_token_ids+1])], [(token, self.tokenizer.decode(torch.tensor([token]))) for i, token in enumerate(starting_token_ids)])    
         return {
             "input_ids": encoded_prompt_and_response.type(torch.int64),
             "labels": labels.type(torch.int64),
             "eig_vec": torch.from_numpy(eig_vec) if eig_vec is not None else None,
+            "len_starting_token_ids": len_starting_token_ids
         }
 
 
@@ -172,7 +188,7 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels", "eig_vec"):
+    for key in ("input_ids", "labels", "eig_vec", "len_starting_token_ids"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
         # Pad right based on the longest sequence
@@ -180,10 +196,11 @@ def _sft_collate_fn(
             [sample[key] for sample in samples],
             batch_first=True,
             padding_value=pad_value,
-        )
+        ) if key != "len_starting_token_ids" else torch.tensor([sample[key] for sample in samples])
 
         # Truncate if needed
-        if max_seq_length > 0:
-            batched[key] = batched[key][:, :max_seq_length]
+        if key != "len_starting_token_ids":
+            if max_seq_length > 0:
+                batched[key] = batched[key][:, :max_seq_length]
 
     return batched

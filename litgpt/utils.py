@@ -737,9 +737,11 @@ def resize_model_vocabulary_size(model, new_vocabulary_size):
     embedding_dim = model.config.n_embd
     old_embeddings = model.get_embeddings()
     
-    if new_vocabulary_size == old_vocab_size:
-        print("The vocabulary size is already the same as the new vocabulary size.")
+    if new_vocabulary_size <= old_vocab_size:
+        print("the new vocav size is less than or equal to the current size. No resizing needed.")
         return 
+    else:
+        print(f"Resizing the vocabulary size from {old_vocab_size} to {new_vocabulary_size}.")
 
     # Assuming `old_vocab_size` and `embedding_dim` are defined as in previous examples
     new_embeddings = torch.zeros((new_vocabulary_size, embedding_dim))
@@ -944,13 +946,18 @@ def check_nvlink_connectivity(fabric=None):
 
 
 def update_positional_mlp_lr(optimizer, model, target_module_name='positional_encoding_mlp', new_lr=1e-2):
+    updated_groups = 0  # Track updates for logging or debugging
     for name, param in model.named_parameters():
         if target_module_name in name:
-            # Identify the correct param group for this parameter
             for param_group in optimizer.param_groups:
-                if param in param_group['params']:
-                    print(f"Setting LR for {target_module_name} in param group: {param_group}")
+                # Correct way to check if `param` is in the parameter group
+                if any(p is param for p in param_group['params']):
+                    print(f"Setting LR for {name} in param group")
                     param_group['lr'] = new_lr
-                    break  # Exit once you've updated the correct param group
+                    updated_groups += 1
+                    break
         else:
-            print(f"Parameter {name} not in {target_module_name}, skipping...")
+            pass  # Reduce verbose output
+
+    if updated_groups == 0:
+        print(f"No parameter groups were updated. Check if {target_module_name} is correct.")

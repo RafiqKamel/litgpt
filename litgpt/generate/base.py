@@ -83,10 +83,11 @@ def next_token(
     model: GPT,
     eig_vec: torch.Tensor,
     input_pos: torch.Tensor,
+    len_starting_token: torch.Tensor,
     x: torch.Tensor,
     **kwargs: Any,
 ) -> torch.Tensor:
-    logits = model(idx=x, input_pos=input_pos, eig_vecs=eig_vec)
+    logits = model(idx=x, input_pos=input_pos, eig_vecs=eig_vec, len_starting_token=len_starting_token)
     next = sample(logits, **kwargs)
     return next.to(dtype=x.dtype)
 
@@ -97,6 +98,7 @@ def generate_fn(
     prompt: torch.Tensor,
     max_returned_tokens: int,
     eig_vec: torch.Tensor,
+    len_starting_token: int,
     *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
@@ -138,6 +140,7 @@ def generate_fn(
             model= model,
             eig_vec=eig_vec,
             input_pos=None,
+            len_starting_token=len_starting_token,
             x=token.view(1, -1).to(torch.int64),
             temperature=temperature,
             top_k=top_k,
@@ -191,6 +194,7 @@ def generate(
     prompt: torch.Tensor,
     max_returned_tokens: int,
     eig_vec: torch.Tensor,
+    len_starting_token,
     *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
@@ -233,6 +237,7 @@ def generate(
             model=model,
             prompt=prompt,
             eig_vec=eig_vec,
+            len_starting_token=len_starting_token,
             max_returned_tokens=max_returned_tokens,
             temperature=temperature,
             top_k=top_k,

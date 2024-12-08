@@ -63,7 +63,8 @@ def merge_lora(
     config = Config.from_file(checkpoint_dir / "model_config.yaml", **lora_params)
     hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
     eig_vec_size = hp_config["train"]["max_seq_length"] * 2
-    config.padded_vocab_size = new_vocab_size if new_vocab_size is not None else config.padded_vocab_size
+    if load_resized_weights:
+        config.padded_vocab_size = new_vocab_size if new_vocab_size is not None else config.padded_vocab_size
 
     with fabric.init_module(), torch.device("meta"):
         model = GPT(config, eig_vec_size=eig_vec_size)

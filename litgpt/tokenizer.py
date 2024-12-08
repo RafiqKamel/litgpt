@@ -27,7 +27,10 @@ class Tokenizer:
 
             self.processor = HFTokenizer.from_file(str(vocabulary_path))
             self.backend = "huggingface"
-            self.processor.add_tokens(list(new_tokens_amr))
+            if len(new_tokens_amr) > 0:
+                self.processor.add_tokens(list(new_tokens_amr))
+            else:
+                print("No new tokens added")    
 
             if (
                 special_tokens_path := checkpoint_dir / "tokenizer_config.json"

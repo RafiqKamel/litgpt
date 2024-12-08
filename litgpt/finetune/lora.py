@@ -255,10 +255,16 @@ def main(
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
     old_vocab_size = model.transformer.wte.weight.size(0)
-    print("old vocab size", old_vocab_size)
-    resize_model_vocabulary_size(model, tokenizer.processor.get_vocab_size())
-    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size, layer=model.transformer.wte, layer_name="transformer.wte")
-    set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1  - old_vocab_size, layer=model.lm_head.linear, layer_name="lm_head.linear")
+    new_vocab_size = tokenizer.processor.get_vocab_size()
+    resizing_model = False
+    print("old vocab size", old_vocab_size, "new vocab size", new_vocab_size)
+    if new_vocab_size > old_vocab_size:
+        resizing_model = True
+        resize_model_vocabulary_size(model, tokenizer.processor.get_vocab_size())
+        set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1 - old_vocab_size, layer=model.transformer.wte, layer_name="transformer.wte")
+        set_new_weights_trainable(num_new_weights=tokenizer.processor.get_vocab_size() + 1  - old_vocab_size, layer=model.lm_head.linear, layer_name="lm_head.linear")
+    else:
+        print("no new weights to set trainable")
     print("model size is (right after resizing): ", model.transformer.wte.weight.size(), model.lm_head.linear.weight.size())
     update_positional_mlp_lr(model=model, new_lr=1e-3, optimizer=optimizer, target_module_name="positional_encoding_mlp")
     train_time = time.perf_counter()
@@ -310,7 +316,7 @@ def main(
         )
         torch.save(model.transformer.wte.state_dict(), save_path.parent / "resized_transformer_wte.pth")
         torch.save(model.lm_head.linear.state_dict(), save_path.parent / "resized_lm_head.pth")
-        merge_lora(checkpoint_dir=save_path.parent, load_resized_weights=True, new_vocab_size = tokenizer.processor.get_vocab_size())
+        merge_lora(checkpoint_dir=save_path.parent, load_resized_weights=resizing_model, new_vocab_size = tokenizer.processor.get_vocab_size())
         # save weight for postional encoding layer
         # Save the weights for the positional encoding layer
 
@@ -372,15 +378,16 @@ def fit(
         iter_num += 1
         iter_t0 = time.perf_counter()
         batch = next(train_iterator)
-        input_ids, targets, eig_vecs = (
+        input_ids, targets, eig_vecs, len_starting_token = (
             batch["input_ids"],
             batch["labels"],
             batch["eig_vec"],
+            batch["len_starting_token_ids"],
         )
 
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
-            logits = model(input_ids, eig_vecs, lm_head_chunk_size=128)
+            logits = model(input_ids, eig_vecs, lm_head_chunk_size=128, len_starting_token=len_starting_token)
             # shift the targets such that output n predicts token n+1
             logits[-1] = logits[-1][..., :-1, :]
             loss = chunked_cross_entropy(logits, targets[..., 1:])
@@ -476,12 +483,13 @@ def validate(
     for k, batch in enumerate(val_dataloader):
         if k >= eval.max_iters:
             break
-        input_ids, targets, eig_vec = (
+        input_ids, targets, eig_vec, len_starting_token = (
             batch["input_ids"],
             batch["labels"],
             batch["eig_vec"],
+            batch["len_starting_token_ids"],
         )
-        logits = model(input_ids, eig_vec)
+        logits = model(input_ids, eig_vec, len_starting_token=len_starting_token)
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )
@@ -513,6 +521,7 @@ def generate_example(
         eigvecs=eig_vec, sentence=instruction, tokenizer=tokenizer
     )
     eig_vec = torch.from_numpy(np.reshape(eig_vec, (1,eig_vec.shape[0], eig_vec.shape[1]))).to(model.device)
+    len_starting_token = torch.tensor([len(tokenizer.encode("<AMR>"))]).to(model.device)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     if torch.equal(encoded[:2], torch.tensor([2, 256000]).to(model.device)):
         encoded[:2] = torch.tensor([256000, 2]).to(model.device)
@@ -530,6 +539,7 @@ def generate_example(
         temperature=0.8,
         eos_id=tokenizer.eos_id,
         eig_vec=eig_vec,
+        len_starting_token=len_starting_token
     )
     model.clear_kv_cache()
     model.train()
