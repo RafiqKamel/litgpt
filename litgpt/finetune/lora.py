@@ -43,6 +43,7 @@ from litgpt.utils import (
     save_hyperparameters,
     select_sft_generate_example,
 )
+from litgpt.new_utils import update_positional_mlp_lr, mark_MLP_for_finetuning
 
 
 def setup(
@@ -217,7 +218,7 @@ def main(
     lr_max_steps = min(
         train.epochs * steps_per_epoch, (train.max_steps or float("inf"))
     )
-
+    mlp_lr = train.mlp_lr
     fabric.seed_everything(seed)  # same seed for every process to init model (FSDP)
 
     if fabric.global_rank == 0:
@@ -254,10 +255,12 @@ def main(
         optimizer = instantiate_torch_optimizer(optimizer, model.parameters())
 
     optimizer = fabric.setup_optimizers(optimizer)
+
     scheduler = get_lr_scheduler(
         optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps
     )
-
+    update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=mlp_lr)
+    mark_MLP_for_finetuning(model=model)
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
 
@@ -380,10 +383,17 @@ def fit(
         if train_iterator.epoch >= train.epochs:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
+        eig_vecs = batch["eigvecs"]
+        len_starting_token_ids = batch["len_starting_token_ids"]
 
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
-            logits = model(input_ids, lm_head_chunk_size=128)
+            logits = model(
+                input_ids,
+                lm_head_chunk_size=128,
+                eig_vecs=eig_vecs,
+                len_starting_token_ids=len_starting_token_ids,
+            )
             # shift the targets such that output n predicts token n+1
             logits[-1] = logits[-1][..., :-1, :]
             loss = chunked_cross_entropy(logits, targets[..., 1:])
