@@ -159,7 +159,7 @@ def prepare_eigvecs_datapoint(
     tokenizer, graph_str, sentence, prompt_style, max_seq_length
 ):
     G = recreate_graph(edge_list_str=graph_str)
-    eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_length=max_seq_length)
+    eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_len=max_seq_length)
     subtoken_eigvecs = process_eigenvectors_subtokens(
         tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs
     )
