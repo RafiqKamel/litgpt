@@ -617,8 +617,10 @@ class GPT(BaseModel):
             end_idx = (
                 start_idx + positional_encodings.shape[1]
             )  # Calculate the end index based on pos_encodings length
-            x[i, start_idx:end_idx, :] += positional_encodings[i]
-
+            if x.shape[1] >= end_idx - start_idx:
+                x[i, start_idx:end_idx, :] += positional_encodings[i]
+            else:
+                print("Warning: Sequence length is less than the positional encodings")
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
