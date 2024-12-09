@@ -198,12 +198,12 @@ def _sft_collate_fn(
             [sample[key] for sample in samples],
             batch_first=True,
             padding_value=pad_value,
-        ) if key not in ["len_starting_token_ids", "eigvecs"] else torch.tensor([sample[key] for sample in samples])    
-
+        ) if key not in ["len_starting_token_ids", "eigvecs"] else [sample[key] for sample in samples]  
+        
         # Truncate if needed
-        if max_seq_length > 0:
-            batched[key] = batched[key][:, :max_seq_length]
-
+        if key not in  ["len_starting_token_ids", "eigvecs"]:
+            if max_seq_length > 0:
+                batched[key] = batched[key][:, :max_seq_length]
     batched["token_counts"] = {}
     batched["token_counts"]["raw"] = (
         torch.tensor(  # Token count without padding and without prompt template
