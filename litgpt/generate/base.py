@@ -90,7 +90,7 @@ def next_token(
         idx=x,
         input_pos=input_pos,
         eig_vecs=eig_vec,
-        len_starting_token=len_starting_token,
+        len_starting_token_ids=len_starting_token,
     )
     next = sample(logits, **kwargs)
     return next.to(dtype=x.dtype)
