@@ -624,6 +624,7 @@ class GPT(BaseModel):
                 x[i, start_idx:end_idx, :] += positional_encodings
             else:
                 print("Warning: Sequence length is less than the positional encodings")
+        
         if self.config.scale_embeddings:
             x = x * (self.config.n_embd**0.5)
         for block in self.transformer.h:
