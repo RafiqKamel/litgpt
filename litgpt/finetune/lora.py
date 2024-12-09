@@ -315,6 +315,10 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
+        torch.save(
+            model.positional_encoding_mlp.state_dict(),
+            save_path.parent / "pos_encoding_weights.pth",
+        )        
         merge_lora(checkpoint_dir=save_path.parent)
 
 
