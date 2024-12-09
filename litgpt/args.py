@@ -45,10 +45,16 @@ class TrainArgs:
         if self.lr_warmup_fraction and not (0 <= self.lr_warmup_fraction <= 1):
             raise ValueError("`--train.lr_warmup_fraction` must be between 0 and 1.")
 
-        if self.lr_warmup_steps and self.max_steps and (self.lr_warmup_steps >= self.max_steps):
+        if (
+            self.lr_warmup_steps
+            and self.max_steps
+            and (self.lr_warmup_steps >= self.max_steps)
+        ):
             warnings.warn(
                 "`--train.lr_warmup_steps` should be less than `--train.max_steps`."
-                f" Got {self.lr_warmup_steps} lr_warmup_steps and {self.max_steps} max_steps.", UserWarning)
+                f" Got {self.lr_warmup_steps} lr_warmup_steps and {self.max_steps} max_steps.",
+                UserWarning,
+            )
 
     def gradient_accumulation_iters(self, devices: int) -> int:
         """Number of iterations between gradient synchronizations"""
@@ -65,9 +71,14 @@ class TrainArgs:
     def warmup_iters(self, devices: int, max_iters: int, train_dataloader) -> int:
         """Number of iterations to warm up the learning rate."""
         if self.lr_warmup_fraction:
-            return min(max_iters, math.ceil(self.lr_warmup_fraction * len(train_dataloader)))
+            return min(
+                max_iters, math.ceil(self.lr_warmup_fraction * len(train_dataloader))
+            )
         if self.lr_warmup_steps:
-            return min(max_iters, self.lr_warmup_steps * self.gradient_accumulation_iters(devices))
+            return min(
+                max_iters,
+                self.lr_warmup_steps * self.gradient_accumulation_iters(devices),
+            )
         return 0
 
 
