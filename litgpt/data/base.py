@@ -66,7 +66,7 @@ class SFTDataset(Dataset):
     ) -> None:
         self.data = data
         self.tokenizer = tokenizer
-        self.prompt_style = "amr2text"
+        prompt_style = "amr2text"
         self.prompt_style = (
             prompt_style
             if isinstance(prompt_style, PromptStyle)
@@ -85,6 +85,7 @@ class SFTDataset(Dataset):
         if self.transform is not None:
             example = self.transform(example)
         prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
+        print("print prompt",prompt)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
             example["output"], bos=False, eos=True, max_length=self.max_seq_length
