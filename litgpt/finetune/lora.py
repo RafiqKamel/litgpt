@@ -235,12 +235,6 @@ def main(
         model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
 
-    fabric.print(
-        f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
-    )
-    fabric.print(
-        f"Number of non-trainable parameters: {num_parameters(model, requires_grad=False):,}"
-    )
 
     model = fabric.setup_module(model)
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
@@ -267,6 +261,13 @@ def main(
     )
     update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=mlp_lr)
     mark_MLP_for_finetuning(model=model)
+    fabric.print(
+        f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
+    )
+    fabric.print(
+        f"Number of non-trainable parameters: {num_parameters(model, requires_grad=False):,}"
+    )
+
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
 
