@@ -204,8 +204,8 @@ def generate_fn(
 
         # Generate the token
         token = next_token(
-            model,
-            input_pos,
+            model=model,
+            input_pos=input_pos,
             eig_vec=eig_vecs,
             len_starting_token=len_starting_token_ids,
             x=token.view(1, -1),
