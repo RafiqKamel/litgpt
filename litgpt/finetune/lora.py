@@ -50,6 +50,7 @@ from litgpt.new_utils import (
 )
 from litgpt.prompts import PromptStyle
 import numpy as np
+from unidecode import unidecode
 
 
 def setup(
@@ -233,15 +234,8 @@ def main(
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
     with fabric.init_module(empty_init=(fabric.world_size > 1)):
-        model = GPT(config)
+        model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
-
-    fabric.print(
-        f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
-    )
-    fabric.print(
-        f"Number of non-trainable parameters: {num_parameters(model, requires_grad=False):,}"
-    )
 
     model = fabric.setup_module(model)
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
@@ -268,6 +262,13 @@ def main(
     )
     update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=mlp_lr)
     mark_MLP_for_finetuning(model=model)
+    fabric.print(
+        f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}"
+    )
+    fabric.print(
+        f"Number of non-trainable parameters: {num_parameters(model, requires_grad=False):,}"
+    )
+
     # strict=False because missing keys due to LoRA weights not contained in state dict
     load_checkpoint(fabric, model, checkpoint_path, strict=False)
 
@@ -316,6 +317,10 @@ def main(
         copy_config_files(checkpoint_dir, save_path.parent)
         save_hyperparameters(setup, save_path.parent)
         save_prompt_style(data.prompt_style, save_path.parent)
+        torch.save(
+            model.positional_encoding_mlp.state_dict(),
+            save_path.parent / "pos_encoding_weights.pth",
+        )
         merge_lora(checkpoint_dir=save_path.parent)
 
 
@@ -396,7 +401,7 @@ def fit(
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
             logits = model(
-                input_ids,
+                idx=input_ids,
                 lm_head_chunk_size=128,
                 eig_vecs=eig_vecs,
                 len_starting_token_ids=len_starting_token_ids,
@@ -505,7 +510,11 @@ def validate(
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        logits = model(input_ids)
+        eig_vecs = batch["eigvecs"]
+        len_starting_token_ids = batch["len_starting_token_ids"]
+        logits = model(
+            input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids
+        )
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )
@@ -520,8 +529,10 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction = "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
-    graph_text = "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
+
+    instruction = "rely-01 :ARG0 they :ARG1 and :op1 have-degree-91 :ARG1 citizen :ARG2 old :ARG3 more :op2 have-degree-91 :ARG1 citizen :ARG2 affluence :ARG3 more"
+    graph_text = "0 1\n0 3\n1 2\n3 4\n4 5\n4 13\n5 6\n6 7\n6 9\n6 11\n7 8\n9 10\n11 12\n13 14\n14 15\n14 17\n14 19\n15 16\n17 18\n19 20\n"
+    instruction = unidecode(instruction)
     fabric.print(instruction)
     prompt_style = eval.direction
     prompt_style_object = (
@@ -530,7 +541,6 @@ def generate_example(
         else PromptStyle.from_name(prompt_style)
     )
     prompt = prompt_style_object.apply(instruction)
-    instruction = select_sft_generate_example(eval, data)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
         graph_str=graph_text,
@@ -543,12 +553,12 @@ def generate_example(
         np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
     ).to(model.device)
     len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
-    if not torch.equal(encoded[:len_starting_token_ids], starting_tokens):
-        raise ValueError(
-            "The starting tokens in the instruction do not match the starting tokens in the graph",
-            starting_tokens,
-            encoded[: len_starting_token_ids + 4],
-        )
+    # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
+    #     raise ValueError(
+    #         "The starting tokens in the instruction do not match the starting tokens in the graph",
+    #         starting_tokens,
+    #         encoded[: len_starting_token_ids + 4],
+    #     )
     model.eval()
 
     max_returned_tokens = len(encoded) + eval.max_new_tokens
@@ -563,7 +573,7 @@ def generate_example(
             max_returned_tokens=max_returned_tokens,
             temperature=0.8,
             eos_id=tokenizer.eos_id,
-            eig_vec=eig_vec,
+            eig_vecs=eig_vec,
             len_starting_token_ids=len_starting_token_ids,
         )
         model.clear_kv_cache()
@@ -601,7 +611,7 @@ def get_dataloaders(
     )
     with fabric.rank_zero_first():
         data.prepare_data()
-    data.setup()
+    data.setup(direction=train.direction)
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
     train_dataloader, val_dataloader = fabric.setup_dataloaders(

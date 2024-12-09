@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
-import unidecode
+from unidecode import unidecode
 from litgpt.new_utils import prepare_eigvecs_datapoint
 
 
@@ -135,7 +135,7 @@ class SFTDataset(Dataset):
             eig_vecs, len_starting_token_ids, starting_token_ids = (
                 prepare_eigvecs_datapoint(
                     tokenizer=self.tokenizer,
-                    graph_str=example["graph"],
+                    graph_str=example["graph_str"],
                     sentence=example["instruction"],
                     prompt_style=self.prompt_style,
                     max_seq_length=self.max_seq_length,
@@ -148,7 +148,7 @@ class SFTDataset(Dataset):
         if len_starting_token_ids != 0:
             # check that the starting token ids are the same as the ones used in the prompt
             if not torch.equal(
-                encoded_prompt[:len_starting_token_ids], starting_token_ids
+                encoded_prompt[:len_starting_token_ids], starting_token_ids.to(encoded_prompt.device)
             ):
                 raise ValueError(
                     f"Starting token ids do not match: {encoded_prompt[:len_starting_token_ids]} != {starting_token_ids}"
@@ -191,20 +191,19 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels"):
+    for key in ("input_ids", "labels", "eigvecs", "len_starting_token_ids"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
-        # Pad right based on the longest sequence
         batched[key] = torch.nn.utils.rnn.pad_sequence(
             [sample[key] for sample in samples],
             batch_first=True,
             padding_value=pad_value,
-        )
-
+        ) if key not in ["len_starting_token_ids", "eigvecs"] else [sample[key] for sample in samples]  
+        
         # Truncate if needed
-        if max_seq_length > 0:
-            batched[key] = batched[key][:, :max_seq_length]
-
+        if key not in  ["len_starting_token_ids", "eigvecs"]:
+            if max_seq_length > 0:
+                batched[key] = batched[key][:, :max_seq_length]
     batched["token_counts"] = {}
     batched["token_counts"]["raw"] = (
         torch.tensor(  # Token count without padding and without prompt template

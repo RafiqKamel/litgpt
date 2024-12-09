@@ -68,10 +68,11 @@ class JSON(DataModule):
         self.batch_size = batch_size
         self.max_seq_length = -1 if max_seq_length is None else max_seq_length
 
-    def setup(self, stage: str = "") -> None:
+    def setup(self, direction: str,stage: str = "") -> None:
         train_data, test_data = self.get_splits()
 
         self.train_dataset = SFTDataset(
+            direction=direction,
             data=train_data,
             tokenizer=self.tokenizer,
             prompt_style=self.prompt_style,
@@ -80,6 +81,7 @@ class JSON(DataModule):
             ignore_index=self.ignore_index,
         )
         self.test_dataset = SFTDataset(
+            direction=direction,
             data=test_data,
             tokenizer=self.tokenizer,
             prompt_style=self.prompt_style,
