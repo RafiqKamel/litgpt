@@ -112,22 +112,23 @@ class GPT(nn.Module):
             mask = None
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        eig_vecs = eig_vecs / eig_vecs.norm(dim=-1, keepdim=True)
-        positional_encodings = self.positional_encoding_mlp(eig_vecs)
-        # normalize the positional encoding
-        positional_encodings = positional_encodings / positional_encodings.norm(
-            dim=-1, keepdim=True
-        )
         # shifting the pos_encodings to the right to account for the added <AMR> token
         for i in range(x.shape[0]):  # Iterate over each batch
+            single_eig_vecs = torch.Tensor(eig_vecs[i]).to(x.device)
+            single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
+            positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
+            # normalize the positional encoding
+            positional_encodings = positional_encodings / positional_encodings.norm(
+            dim=-1, keepdim=True
+            )
             start_idx = len_starting_token_ids[
                 i
             ]  # Get the starting token index for the i-th batch
             end_idx = (
-                start_idx + positional_encodings.shape[1]
+                start_idx + positional_encodings.shape[0]
             )  # Calculate the end index based on pos_encodings length
             if x.shape[1] >= end_idx - start_idx:
-                x[i, start_idx:end_idx, :] += positional_encodings[i]
+                x[i, start_idx:end_idx, :] += positional_encodings
             else:
                 print("Warning: Sequence length is less than the positional encodings")
         if self.config.scale_embeddings:
