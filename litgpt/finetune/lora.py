@@ -399,7 +399,7 @@ def fit(
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
             logits = model(
-                input_ids,
+                idx=input_ids,
                 lm_head_chunk_size=128,
                 eig_vecs=eig_vecs,
                 len_starting_token_ids=len_starting_token_ids,
