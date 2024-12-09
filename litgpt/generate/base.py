@@ -92,8 +92,8 @@ def next_token(
         eig_vecs=eig_vec,
         len_starting_token_ids=len_starting_token,
     )
-    next = sample(logits, **kwargs)
-    return next.to(dtype=x.dtype)
+    _next = sample(logits, **kwargs)
+    return _next.to(dtype=x.dtype)
 
 
 def batched_sample(logits: List[torch.Tensor], kwargs: List[dict]) -> torch.Tensor:
