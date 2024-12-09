@@ -314,6 +314,22 @@ class Salamandra(PromptStyle):
         return f"<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
+class AMR2Text(PromptStyle):
+    def name(self) -> str:
+        return "amr2text"
+
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<AMR>{prompt}<text>"
+
+
+class Text2AMR(PromptStyle):
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"<text>{prompt}<AMR>"
+
+    def name(self) -> str:
+        return "text2amr"
+
+
 # Maps prompt style names to PromptStyle classes
 prompt_styles: Dict[str, Type[PromptStyle]] = {
     # Dataset-specific prompt styles
@@ -340,6 +356,8 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "qwen2.5": Qwen2_5,
     "qwq": QwQ,
     "salamandra": Salamandra,
+    "amr2text": AMR2Text,
+    "text2amr": Text2AMR,
 }
 
 

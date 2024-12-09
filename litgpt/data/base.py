@@ -66,6 +66,7 @@ class SFTDataset(Dataset):
     ) -> None:
         self.data = data
         self.tokenizer = tokenizer
+        self.prompt_style = "amr2text"
         self.prompt_style = (
             prompt_style
             if isinstance(prompt_style, PromptStyle)
