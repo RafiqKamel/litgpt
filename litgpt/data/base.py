@@ -148,7 +148,7 @@ class SFTDataset(Dataset):
         if len_starting_token_ids != 0:
             # check that the starting token ids are the same as the ones used in the prompt
             if not torch.equal(
-                encoded_prompt[:len_starting_token_ids], starting_token_ids
+                encoded_prompt[:len_starting_token_ids], starting_token_ids.to(encoded_prompt.device)
             ):
                 raise ValueError(
                     f"Starting token ids do not match: {encoded_prompt[:len_starting_token_ids]} != {starting_token_ids}"

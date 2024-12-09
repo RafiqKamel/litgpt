@@ -546,7 +546,7 @@ def generate_example(
         max_seq_length=model.max_seq_length,
         prompt_style=prompt_style,
     )
-    if not torch.equal(encoded[:len_starting_token_ids], starting_tokens):
+    if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(encoded.device)):
         raise ValueError(
             "The starting tokens in the instruction do not match the starting tokens in the graph",
             starting_tokens,
