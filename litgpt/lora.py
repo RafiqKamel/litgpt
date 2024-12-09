@@ -613,7 +613,7 @@ class GPT(BaseModel):
             # normalize the positional encoding
             positional_encodings = positional_encodings / positional_encodings.norm(
             dim=-1, keepdim=True
-        )
+            )
             start_idx = len_starting_token_ids[
                 i
             ]  # Get the starting token index for the i-th batch
