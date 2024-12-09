@@ -49,7 +49,9 @@ from litgpt.new_utils import (
     prepare_eigvecs_datapoint,
 )
 from litgpt.prompts import PromptStyle
+import numpy as np
 from unidecode import unidecode
+
 
 def setup(
     checkpoint_dir: Path,
@@ -235,7 +237,6 @@ def main(
         model = GPT(config, eig_vec_size=train.max_seq_length * 2)
     mark_only_lora_as_trainable(model)
 
-
     model = fabric.setup_module(model)
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
         optimizer = instantiate_bnb_optimizer(optimizer, model.parameters())
@@ -319,7 +320,7 @@ def main(
         torch.save(
             model.positional_encoding_mlp.state_dict(),
             save_path.parent / "pos_encoding_weights.pth",
-        )        
+        )
         merge_lora(checkpoint_dir=save_path.parent)
 
 
@@ -511,7 +512,9 @@ def validate(
         input_ids, targets = batch["input_ids"], batch["labels"]
         eig_vecs = batch["eigvecs"]
         len_starting_token_ids = batch["len_starting_token_ids"]
-        logits = model(input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids)
+        logits = model(
+            input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids
+        )
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )
@@ -546,6 +549,10 @@ def generate_example(
         max_seq_length=model.max_seq_length,
         prompt_style=prompt_style,
     )
+    eig_vec = torch.from_numpy(
+        np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
+    ).to(model.device)
+    len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
     # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
     #     raise ValueError(
     #         "The starting tokens in the instruction do not match the starting tokens in the graph",
