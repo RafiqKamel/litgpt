@@ -538,7 +538,6 @@ def generate_example(
         else PromptStyle.from_name(prompt_style)
     )
     prompt = prompt_style_object.apply(instruction)
-    instruction = select_sft_generate_example(eval, data)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
         graph_str=graph_text,
