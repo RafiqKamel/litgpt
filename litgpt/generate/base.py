@@ -78,11 +78,11 @@ def next_token(model: GPT, input_pos: torch.Tensor, x: torch.Tensor, **kwargs: A
     _next = sample(logits, **kwargs).to(dtype=torch.int64)
     return _next
 
-def batched_sample(logits: list[torch.Tensor], kwargs: list[dict]) -> torch.Tensor:
+def batched_sample(logits: List[torch.Tensor], kwargs: List[dict]) -> torch.Tensor:
     assert len(logits) == len(kwargs), "logits and kwargs must have the same length."
     return torch.stack([sample(l, **sample_args).to(dtype=torch.int64) for sample_args, l in zip(kwargs, logits)], dim=0)
 
-def batched_next_token(model: GPT, input_pos: torch.Tensor, x: torch.Tensor, kwargs: Union[dict, list[dict]]) -> torch.Tensor:
+def batched_next_token(model: GPT, input_pos: torch.Tensor, x: torch.Tensor, kwargs: Union[dict, List[dict]]) -> torch.Tensor:
     # Where:
     # input_pos is a 1d tensor of shape [seq_length...]
     # x is context tokens to add to the kvcache.
@@ -219,11 +219,11 @@ def batched_generate_fn(
     prompts: torch.Tensor,
     max_returned_tokens: int,
     *,
-    sample_args: Union[list[dict], dict],
+    sample_args: Union[List[dict], dict],
     stop_tokens: Tuple[List[int], ...] = (),
     include_prompt: bool,
     include_eos: bool,
-) -> Iterator[list[Union[torch.Tensor, None]]]:
+) -> Iterator[List[Union[torch.Tensor, None]]]:
     """
     Generates tokens for a batch of prompts.
 
