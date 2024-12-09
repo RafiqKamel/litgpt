@@ -525,8 +525,9 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-    instruction = "send :mode imperative :ARG0 you :ARG1 thing :ARG1-of message :mod this :beneficiary we"
-    graph_text = "0 1\n0 3\n0 5\n0 11\n1 2\n3 4\n5 6\n11 12\n6 7\n6 9\n7 8\n9 10"
+
+    instruction = "They rely on older citizens and more affluent citizens.",
+    graph_text = "0 1\n0 3\n1 2\n3 4\n4 5\n4 13\n5 6\n6 7\n6 9\n6 11\n7 8\n9 10\n11 12\n13 14\n14 15\n14 17\n14 19\n15 16\n17 18\n19 20\n",
     fabric.print(instruction)
     prompt_style = eval.direction
     prompt_style_object = (
