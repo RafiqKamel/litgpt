@@ -546,12 +546,12 @@ def generate_example(
         max_seq_length=model.max_seq_length,
         prompt_style=prompt_style,
     )
-    if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
-        raise ValueError(
-            "The starting tokens in the instruction do not match the starting tokens in the graph",
-            starting_tokens,
-            encoded[: len_starting_token_ids + 4],
-        )
+    # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
+    #     raise ValueError(
+    #         "The starting tokens in the instruction do not match the starting tokens in the graph",
+    #         starting_tokens,
+    #         encoded[: len_starting_token_ids + 4],
+    #     )
     model.eval()
 
     max_returned_tokens = len(encoded) + eval.max_new_tokens
@@ -566,7 +566,7 @@ def generate_example(
             max_returned_tokens=max_returned_tokens,
             temperature=0.8,
             eos_id=tokenizer.eos_id,
-            eig_vec=eig_vec,
+            eig_vecs=eig_vec,
             len_starting_token_ids=len_starting_token_ids,
         )
         model.clear_kv_cache()
