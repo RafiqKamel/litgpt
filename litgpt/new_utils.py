@@ -210,5 +210,3 @@ def mark_MLP_for_finetuning(model, target_module_name="positional_encoding_mlp")
         if target_module_name in name:
             print(f"Marking {name} for finetuning")
             param.requires_grad = True
-        else:
-            param.requires_grad = False
