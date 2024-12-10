@@ -317,17 +317,25 @@ class Salamandra(PromptStyle):
 class AMR2Text(PromptStyle):
     def name(self) -> str:
         return "amr2text"
-
     def apply(self, prompt: str, **kwargs: str) -> str:
-        return f"<AMR>{prompt}<text>"
+        return f"{self.starting_token()}{prompt}{self.ending_token()}"
+    def starting_token(self) -> str:
+        return "<AMR>"
+    def ending_token(self) -> str:
+        return "<text>"
 
 
 class Text2AMR(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
-        return f"<text>{prompt}<AMR>"
+        return f"{self.starting_token()}{prompt}{self.ending_token()}"
 
     def name(self) -> str:
         return "text2amr"
+    
+    def starting_token(self) -> str:
+        return "<text>"
+    def ending_token(self) -> str:
+        return "<AMR>"
 
 
 # Maps prompt style names to PromptStyle classes
