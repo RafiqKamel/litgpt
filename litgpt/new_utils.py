@@ -192,7 +192,7 @@ def update_positional_mlp_lr(
             for param_group in optimizer.param_groups:
                 # Correct way to check if `param` is in the parameter group
                 if any(p is param for p in param_group["params"]):
-                    print(f"Setting LR for {name} in param group")
+                    #print(f"Setting LR for {name} in param group")
                     param_group["lr"] = new_lr
                     updated_groups += 1
                     break
