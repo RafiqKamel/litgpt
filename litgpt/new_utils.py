@@ -13,6 +13,7 @@ import yaml
 import unicodedata
 
 
+
 def recreate_graph(edge_list_str: str):
     if edge_list_str == "":
         graph = nx.DiGraph()
@@ -163,28 +164,14 @@ def prepare_eigvecs_datapoint(
     subtoken_eigvecs = process_eigenvectors_subtokens(
         tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs
     )
-    if type(prompt_style) == str:
-        if prompt_style == "amr2text":
-            starting_token_ids = tokenizer.encode("<AMR>")
-        elif prompt_style == "text2amr":
-            starting_token_ids = tokenizer.encode("<text>")
-        else:
-            starting_token_ids = []
-            print("Error: Unknown prompt style", prompt_style)
-    else:
-        if prompt_style.name() == "amr2text":
-            starting_token_ids = tokenizer.encode("<AMR>")
-        elif prompt_style.name() == "text2amr":
-            starting_token_ids = tokenizer.encode("<text>")
-        else:
-            starting_token_ids = []
-            print("Error: Unknown prompt style", prompt_style)
+    starting_token = prompt_style.starting_token()
+    starting_token_ids = tokenizer.encode(starting_token)
     len_starting_token_ids = len(starting_token_ids)
     return subtoken_eigvecs, len_starting_token_ids, starting_token_ids
 
 
 def update_positional_mlp_lr(
-    optimizer, model, new_lr=1e-2, target_module_name="positional_encoding_mlp"
+    optimizer, model, new_lr, target_module_name="positional_encoding_mlp"
 ):
     updated_groups = 0  # Track updates for logging or debugging
     for name, param in model.named_parameters():

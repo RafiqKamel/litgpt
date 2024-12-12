@@ -320,9 +320,18 @@ class AMR2Text(PromptStyle):
     def apply(self, prompt: str, **kwargs: str) -> str:
         return f"{self.starting_token()}{prompt}{self.ending_token()}"
     def starting_token(self) -> str:
-        return "<AMR>"
+        # Starting token includes task, instructions, and the AMR
+        return (
+            f"<AMR-to-Text>\n"
+            f"[Task: AMR-to-Text]\n"
+            f"[Instruction] Convert the following AMR into natural language text.\n"
+            f"[Input: AMR]\n"
+        )
+
     def ending_token(self) -> str:
-        return "<text>"
+        # End token indicating completion of the task
+        return "\n[Output: Text]"
+
 
 
 class Text2AMR(PromptStyle):
