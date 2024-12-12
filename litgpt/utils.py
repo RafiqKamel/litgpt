@@ -690,8 +690,9 @@ def instantiate_torch_optimizer(optimizer, model_parameters,model_named_params, 
         other_params = [param for param in all_model_params if id(param) not in positional_encoding_ids]
         # Create parameter groups
         model_parameters = [
-            {"params": positional_encoding_params, "lr": pe_mlp_lr},  # Custom LR for `positional_encoding_mlp`
             {"params": other_params},  # Default LR for others
+            {"params": positional_encoding_params, "lr": pe_mlp_lr},  # Custom LR for `positional_encoding_mlp`
+
         ]
 
         # Instantiate the optimizer with the parameter groups
