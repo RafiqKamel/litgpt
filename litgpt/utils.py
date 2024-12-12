@@ -666,7 +666,6 @@ def instantiate_torch_optimizer(optimizer, model_parameters,model_named_params, 
     #   bnb.optim.AdamW8bit
     #   grokadamw.GrokAdamW
     #   torch.optim.RMSprop
-    print(f"model_named_params: {model_named_params}")
     if isinstance(optimizer, str):
         if "." in optimizer:
             class_module, class_name = optimizer.rsplit(".", 1)
@@ -689,9 +688,6 @@ def instantiate_torch_optimizer(optimizer, model_parameters,model_named_params, 
         positional_encoding_ids = {id(p) for p in positional_encoding_params}
 
         other_params = [param for param in all_model_params if id(param) not in positional_encoding_ids]
-        
-        print(f"positional_encoding_params: {positional_encoding_params}")
-        print(f"other_params: {other_params}")
         # Create parameter groups
         model_parameters = [
             {"params": positional_encoding_params, "lr": pe_mlp_lr},  # Custom LR for `positional_encoding_mlp`
