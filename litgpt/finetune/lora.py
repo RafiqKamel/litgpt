@@ -238,6 +238,7 @@ def main(
     mark_only_lora_as_trainable(model)
 
     model = fabric.setup_module(model)
+    mlp_lr = train.mlp_lr
     if isinstance(fabric.strategy.precision, BitsandbytesPrecision):
         optimizer = instantiate_bnb_optimizer(optimizer, model.parameters())
 
@@ -252,8 +253,11 @@ def main(
         model.transformer.wte = model.transformer.wte.to(
             device=old_embedding.weight.device, dtype=old_embedding.weight.dtype
         )
-    else:
-        optimizer = instantiate_torch_optimizer(optimizer, model.parameters())
+    else: 
+        optimizer = instantiate_torch_optimizer(optimizer=optimizer, 
+                                                model_parameters=model.parameters(), 
+                                                model_named_params=model.named_parameters(), 
+                                                pe_mlp_lr=mlp_lr)
 
     optimizer = fabric.setup_optimizers(optimizer)
 
@@ -449,6 +453,8 @@ def fit(
                 * fabric.world_size,
                 "learning_rate": scheduler.get_last_lr()[0],
             }
+            # update lr for positional mlp
+            update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=train.mlp_lr) 
             if isinstance(val_loss, torch.Tensor):
                 val_loss = f"{val_loss:.3f}"
             fabric.print(

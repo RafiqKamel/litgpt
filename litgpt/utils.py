@@ -661,12 +661,12 @@ def instantiate_bnb_optimizer(optimizer, model_parameters):
     return optimizer
 
 
-def instantiate_torch_optimizer(optimizer, model_parameters, **kwargs):
+def instantiate_torch_optimizer(optimizer, model_parameters,model_named_params, pe_mlp_lr,**kwargs):
     # Special care taken where some optimizers do not have some parameters referenced in some of the code, for example "fused" in the pretrain.py script:
     #   bnb.optim.AdamW8bit
     #   grokadamw.GrokAdamW
     #   torch.optim.RMSprop
-
+    print(f"model_named_params: {model_named_params}")
     if isinstance(optimizer, str):
         if "." in optimizer:
             class_module, class_name = optimizer.rsplit(".", 1)
@@ -680,6 +680,25 @@ def instantiate_torch_optimizer(optimizer, model_parameters, **kwargs):
         kwargs = {
             key: value for key, value in dict(kwargs).items() if key in valid_params
         }
+
+        # Define parameter groups for `positional_encoding_mlp` and others
+        positional_encoding_params = [
+            param for name, param in model_named_params if "positional_encoding_mlp" in name
+        ]
+        all_model_params = list(model_parameters)
+        positional_encoding_ids = {id(p) for p in positional_encoding_params}
+
+        other_params = [param for param in all_model_params if id(param) not in positional_encoding_ids]
+        
+        print(f"positional_encoding_params: {positional_encoding_params}")
+        print(f"other_params: {other_params}")
+        # Create parameter groups
+        model_parameters = [
+            {"params": positional_encoding_params, "lr": pe_mlp_lr},  # Custom LR for `positional_encoding_mlp`
+            {"params": other_params},  # Default LR for others
+        ]
+
+        # Instantiate the optimizer with the parameter groups
         optimizer = optimizer_cls(model_parameters, **kwargs)
     elif isinstance(optimizer, dict):
         optimizer = dict(optimizer)
