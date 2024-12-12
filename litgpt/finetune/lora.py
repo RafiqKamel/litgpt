@@ -454,7 +454,7 @@ def fit(
                 "learning_rate": scheduler.get_last_lr()[0],
             }
             # update lr for positional mlp
-            curr_mlp_lr = scheduler.get_last_lr()[0] if scheduler.get_last_lr()!=0 else train.mlp_lr
+            curr_mlp_lr = scheduler.get_last_lr()[0] *10 if scheduler.get_last_lr()!=0 else train.mlp_lr
             update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=curr_mlp_lr) 
             if isinstance(val_loss, torch.Tensor):
                 val_loss = f"{val_loss:.3f}"
