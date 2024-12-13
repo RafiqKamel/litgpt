@@ -610,7 +610,7 @@ class GPT(BaseModel):
         if add:
             for i in range(x.shape[0]):  # Iterate over each batch
                 single_eig_vecs = torch.Tensor(eig_vecs[i]).to(x.device)
-                single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
+                #single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
                 positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
                 # normalize the positional encoding
                 # positional_encodings = positional_encodings / positional_encodings.norm(
