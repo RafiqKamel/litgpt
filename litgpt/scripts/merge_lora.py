@@ -60,7 +60,7 @@ def merge_lora(
     fabric = L.Fabric(devices=1, precision=precision, accelerator="cpu")
     config = Config.from_file(checkpoint_dir / "model_config.yaml", **lora_params)
     hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
-    num_of_eigenvecs = hp_config["train"]["num_of_eigenvecs"]
+    num_of_eigenvecs = hp_config["train"]["number_of_eigenvecs"]
     if num_of_eigenvecs == -1:
         eig_vec_size = hp_config["train"]["max_seq_length"] * 2
     else:
