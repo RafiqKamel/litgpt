@@ -41,6 +41,8 @@ class TrainArgs:
     
     number_of_eigenvecs: int = -1
     """Number of eigenvecs to use in the PE MLP head"""
+    
+    mlp_lr_multiplier: float = 1.0
 
     # Optimization args
     max_norm: Optional[float] = None
