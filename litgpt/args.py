@@ -37,6 +37,10 @@ class TrainArgs:
     """amr2text or text2amr"""
 
     mlp_lr: float = 1e-2
+    """initial Learning rate for the PE MLP head"""
+    
+    number_of_eigenvecs: int = -1
+    """Number of eigenvecs to use in the PE MLP head"""
 
     # Optimization args
     max_norm: Optional[float] = None
