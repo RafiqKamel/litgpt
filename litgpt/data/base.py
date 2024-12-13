@@ -20,6 +20,7 @@ class DataModule(LightningDataModule):
     @abstractmethod
     def connect(
         self,
+        num_of_eigenvecs: int,
         tokenizer: Optional[Tokenizer] = None,
         batch_size: int = 1,
         max_seq_length: Optional[int] = None,
@@ -62,6 +63,7 @@ class SFTDataset(Dataset):
         tokenizer: Tokenizer,
         prompt_style: Union[str, PromptStyle],
         direction: str,
+        num_of_eigenvecs: int,
         max_seq_length: int = -1,
         mask_prompt: bool = True,
         ignore_index: int = -100,
@@ -89,6 +91,7 @@ class SFTDataset(Dataset):
         self.mask_prompt = mask_prompt
         self.ignore_index = ignore_index
         self.transform = transform
+        self.num_of_eigenvecs = num_of_eigenvecs
 
     def __len__(self) -> int:
         return len(self.data)
@@ -139,6 +142,7 @@ class SFTDataset(Dataset):
                     sentence=example["instruction"],
                     prompt_style=self.prompt_style,
                     max_seq_length=self.max_seq_length,
+                    num_of_eigenvecs=self.num_of_eigenvecs,
                 )
             )
             example["eigvecs"] = eig_vecs

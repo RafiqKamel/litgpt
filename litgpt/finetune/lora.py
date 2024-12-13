@@ -233,8 +233,12 @@ def main(
         os.makedirs(out_dir, exist_ok=True)
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
+    if train.number_of_eigenvecs == -1:
+        eig_vec_size = train.max_seq_length * 2
+    else:
+        eig_vec_size = train.number_of_eigenvecs * 2
     with fabric.init_module(empty_init=(fabric.world_size > 1)):
-        model = GPT(config, eig_vec_size=train.max_seq_length * 2)
+        model = GPT(config, eig_vec_size=eig_vec_size)
     mark_only_lora_as_trainable(model)
 
     model = fabric.setup_module(model)
@@ -414,7 +418,12 @@ def fit(
             logits[-1] = logits[-1][..., :-1, :]
             loss = chunked_cross_entropy(logits, targets[..., 1:])
             fabric.backward(loss / train.gradient_accumulation_iters(devices))
-
+        param_to_name = {p: n for n, p in model.named_parameters()}
+        # Print parameter names and learning rates
+        for i, param_group in enumerate(optimizer.param_groups):
+            example_param = param_group['params'][0]
+            name = param_to_name.get(example_param, "Unknown")
+            print(f"Parameter group {i} containing {name}: Learning rate = {param_group['lr']:.2e}")
         running_loss.update(loss.detach())
 
         if not is_accumulating:
@@ -454,7 +463,7 @@ def fit(
                 "learning_rate": scheduler.get_last_lr()[0],
             }
             # update lr for positional mlp
-            curr_mlp_lr = scheduler.get_last_lr()[0] *10 if scheduler.get_last_lr()!=0 else train.mlp_lr
+            curr_mlp_lr = scheduler.get_last_lr()[0] *20 if scheduler.get_last_lr()!=0 else train.mlp_lr
             update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=curr_mlp_lr) 
             if isinstance(val_loss, torch.Tensor):
                 val_loss = f"{val_loss:.3f}"
@@ -464,6 +473,7 @@ def fit(
                 f" val: {val_loss} |"
                 f" iter time: {metrics['iter_time'] * 1000:.2f} ms"
                 f"{' (step)' if not is_accumulating else ''}"
+                f" | learning rate: {metrics['learning_rate']:.2e}"
             )
             fabric.log_dict(metrics, step=iter_num)
 
@@ -554,7 +564,7 @@ def generate_example(
         tokenizer=tokenizer,
         sentence=instruction,
         max_seq_length=model.max_seq_length,
-        prompt_style=prompt_style,
+        prompt_style=prompt_style_object,
     )
     eig_vec = torch.from_numpy(
         np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
@@ -618,7 +628,7 @@ def get_dataloaders(
     )
     with fabric.rank_zero_first():
         data.prepare_data()
-    data.setup(direction=train.direction)
+    data.setup(direction=train.direction, num_of_eigenvecs=train.number_of_eigenvecs)
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
     train_dataloader, val_dataloader = fabric.setup_dataloaders(

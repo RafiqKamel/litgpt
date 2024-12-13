@@ -36,10 +36,12 @@ def magL_eigenvectors(MagL):
     return eig_vecs
 
 
-def magnetic_laplacian_eigenvectors(g, max_seq_len, q=magentic_laplace_encodings_q):
+def magnetic_laplacian_eigenvectors(g, max_seq_len, num_of_eigenvecs,q=magentic_laplace_encodings_q):
     MagL = magnetic_laplacian(G=g, q=q)
     vec = magL_eigenvectors(MagL)
-    vec = pad_and_concat_eigenvectors(vec, max_seq_len)
+    if num_of_eigenvecs > 0 and num_of_eigenvecs < vec.shape[1]:
+        vec = vec[:, :num_of_eigenvecs]
+    vec = pad_and_concat_eigenvectors(vec, max_seq_len = max_seq_len if num_of_eigenvecs == -1 else num_of_eigenvecs) 
     return vec
 
 

@@ -157,10 +157,10 @@ def create_edge_list_sequence(n_tokens):
 
 
 def prepare_eigvecs_datapoint(
-    tokenizer, graph_str, sentence, prompt_style, max_seq_length
+    tokenizer, graph_str, sentence, prompt_style, max_seq_length, num_of_eigenvecs
 ):
     G = recreate_graph(edge_list_str=graph_str)
-    eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_len=max_seq_length)
+    eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_len=max_seq_length, num_of_eigenvecs=num_of_eigenvecs)
     subtoken_eigvecs = process_eigenvectors_subtokens(
         tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs
     )
