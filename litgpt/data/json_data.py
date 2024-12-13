@@ -92,6 +92,7 @@ class JSON(DataModule):
             max_seq_length=self.max_seq_length,
             mask_prompt=self.mask_prompt,
             ignore_index=self.ignore_index,
+            num_of_eigenvecs=num_of_eigenvecs,
         )
 
     def train_dataloader(self) -> DataLoader:
