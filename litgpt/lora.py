@@ -613,9 +613,9 @@ class GPT(BaseModel):
                 single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
                 positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
                 # normalize the positional encoding
-                positional_encodings = positional_encodings / positional_encodings.norm(
-                dim=-1, keepdim=True
-                )
+                # positional_encodings = positional_encodings / positional_encodings.norm(
+                # dim=-1, keepdim=True
+                # )
                 start_idx = len_starting_token_ids[
                     i
                 ]  # Get the starting token index for the i-th batch
