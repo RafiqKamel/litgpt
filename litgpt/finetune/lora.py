@@ -217,6 +217,7 @@ def main(
 ) -> None:
     validate_args(train, eval)
     eval.direction = train.direction
+    eval.number_of_eigenvecs = train.number_of_eigenvecs
 
     tokenizer = Tokenizer(checkpoint_dir)
     train_dataloader, val_dataloader = get_dataloaders(fabric, data, tokenizer, train)
@@ -463,7 +464,7 @@ def fit(
                 "learning_rate": scheduler.get_last_lr()[0],
             }
             # update lr for positional mlp
-            curr_mlp_lr = scheduler.get_last_lr()[0] *20 if scheduler.get_last_lr()!=0 else train.mlp_lr
+            curr_mlp_lr = scheduler.get_last_lr()[0] *train.mlp_lr_multiplier if scheduler.get_last_lr()!=0 else train.mlp_lr
             update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=curr_mlp_lr) 
             if isinstance(val_loss, torch.Tensor):
                 val_loss = f"{val_loss:.3f}"
@@ -565,6 +566,7 @@ def generate_example(
         sentence=instruction,
         max_seq_length=model.max_seq_length,
         prompt_style=prompt_style_object,
+        num_of_eigenvecs=eval.number_of_eigenvecs,
     )
     eig_vec = torch.from_numpy(
         np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
