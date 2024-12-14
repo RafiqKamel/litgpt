@@ -330,7 +330,7 @@ class AMR2Text(PromptStyle):
 
     def ending_token(self) -> str:
         # End token indicating completion of the task
-        return "\n[Output: Text]"
+        return "\n[Output: Text]\n"
 
 
 
