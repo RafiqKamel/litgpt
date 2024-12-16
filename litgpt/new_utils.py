@@ -91,7 +91,7 @@ def positional_encoding(
         encoding[i] = np.sin(angle)
         if i + 1 < d_model:
             encoding[i + 1] = np.cos(angle)
-
+    encoding = encoding / torch.norm(torch.tensor(encoding))
     return encoding
 
 
