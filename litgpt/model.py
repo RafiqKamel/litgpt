@@ -766,11 +766,9 @@ class PositionalEncodingMLP(nn.Module):
         self.fc1 = nn.Linear(input_dim, output_dim)
         self.act = nn.GELU()
         self.fc2 = nn.Linear(output_dim, output_dim)
-        self.ln = nn.LayerNorm(output_dim)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
         x = self.fc2(x)
-        x = self.ln(x)
         return x
