@@ -206,7 +206,7 @@ def generate_fn(
         new_token = next_token(
             model= model,
             eig_vec=eig_vecs,
-            input_pos=input_pos,
+            input_pos=None,
             len_starting_token=len_starting_token_ids,
             x=token.view(1, -1),
             temperature=temperature,
