@@ -1,3 +1,4 @@
-sinousidial_encodings_q = 10000
+sinousidial_encodings_q = 1000
 magentic_laplace_encodings_q = 1e-3
-sinousidial_encodings_dim = 16
+sinousidial_encodings_dim = 32
+add_positional_encodings = True

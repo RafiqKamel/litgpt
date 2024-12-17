@@ -60,7 +60,7 @@ from litgpt.model import CausalSelfAttention as BaseCausalSelfAttention
 from litgpt.model import KVCache
 from litgpt.utils import map_old_state_dict_weights
 from litgpt.model import PositionalEncodingMLP
-from litgpt.positional_encodings_config import sinousidial_encodings_dim
+from litgpt.positional_encodings_config import sinousidial_encodings_dim, add_positional_encodings
 
 
 class LoRALayer(nn.Module):
@@ -604,7 +604,7 @@ class GPT(BaseModel):
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
 
-        add = True
+        add = add_positional_encodings
         
         # shifting the pos_encodings to the right to account for the added <AMR> token
         if add:
