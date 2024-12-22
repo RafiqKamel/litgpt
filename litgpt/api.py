@@ -37,6 +37,7 @@ from litgpt.utils import (
     load_checkpoint,
     save_config,
 )
+from litgpt.new_utils import prepare_eigvecs_datapoint, load_properties_from_yaml
 
 
 class LLM(torch.nn.Module):
@@ -51,13 +52,18 @@ class LLM(torch.nn.Module):
         fabric: L.Fabric = None,
         generate_strategy: Optional[Literal["sequential", "tensor_parallel"]] = None,
         kv_cache_initialized: bool = False,
-        fixed_kv_cache_size: Union[int, Literal["max_model_supported"], None] = None
+        fixed_kv_cache_size: Union[int, Literal["max_model_supported"], None] = None,
+        num_of_eigenvecs: int = -1
     ) -> None:
         super().__init__()
         self.model = model
         self.preprocessor = preprocessor
         self.devices = devices
-        self.prompt_style = prompt_style
+        self.prompt_style = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
+        )
         self.config = config
         self.checkpoint_dir = checkpoint_dir
         self.fabric = fabric
@@ -65,6 +71,7 @@ class LLM(torch.nn.Module):
         self.kv_cache_initialized = kv_cache_initialized
         self.fixed_kv_cache_size = fixed_kv_cache_size
         self.prev_generated_seq_length = 0
+        self.num_of_eigenvecs = num_of_eigenvecs
 
     """
     LLM model class for inference, pretraining, and finetuning.
@@ -90,9 +97,11 @@ class LLM(torch.nn.Module):
         self,
         input_ids: torch.Tensor,
         target_ids: Optional[torch.Tensor] = None,
-        loss_fn: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None
+        loss_fn: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        eig_vecs: Optional[torch.Tensor] = None,
+        len_starting_tokens: Optional[int] = None
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        logits = self.model(input_ids)
+        logits = self.model(input_ids, eig_vecs=eig_vecs, len_starting_tokens=len_starting_tokens)
         if target_ids is not None:
             if loss_fn is None:
                 loss_fn = chunked_cross_entropy
@@ -226,8 +235,14 @@ class LLM(torch.nn.Module):
                 precision=get_default_supported_precision(training=False),
             )
 
+            hp_config = load_properties_from_yaml(checkpoint_dir / "hyperparameters.yaml")
+            eig_vec_size = hp_config["train"]["max_seq_length"] * 2
+            num_of_eigenvecs = hp_config["train"]["number_of_eigenvecs"]
+            eig_vec_size = num_of_eigenvecs*2 if num_of_eigenvecs > 0 else eig_vec_size
+            direction = hp_config["train"]["direction"]
+            prompt_style = direction if direction in ["amr2text", "text2amr"] else prompt_style
             with fabric.init_module(empty_init=False):
-                model = GPT(config)
+                model = GPT(config, eig_vec_size=eig_vec_size)
             model.eval()
             preprocessor = Preprocessor(tokenizer, device=fabric.device)
 
@@ -246,7 +261,7 @@ class LLM(torch.nn.Module):
         return cls(
             model=model, preprocessor=preprocessor, prompt_style=prompt_style,
             config=config, checkpoint_dir=checkpoint_dir, fabric=fabric, generate_strategy=None,
-            kv_cache_initialized=False, fixed_kv_cache_size=False
+            kv_cache_initialized=False, fixed_kv_cache_size=False, num_of_eigenvecs=num_of_eigenvecs
         )
 
     def distribute(
@@ -443,6 +458,8 @@ class LLM(torch.nn.Module):
         self.fabric = fabric
         self.preprocessor.device = fabric.device
 
+    
+
     @torch.inference_mode()
     def generate(
         self,
@@ -452,7 +469,8 @@ class LLM(torch.nn.Module):
         top_k: Optional[int] = None,
         top_p: float = 1.0,
         return_as_token_ids: bool = False,
-        stream: bool = False
+        stream: bool = False,
+        graph_str: Optional[str] = None 
     ) -> Union[str, torch.Tensor]:
         """
         Takes a conditioning sequence (prompt) as input and continues to generate as many tokens as requested.
@@ -488,6 +506,11 @@ class LLM(torch.nn.Module):
                 "or .trainer_setup() method to initialize the model."
             )
         input_ids = self._text_to_token_ids(prompt)
+        eig_vecs, len_starting_tokens,_ = prepare_eigvecs_datapoint(graph_str=graph_str, tokenizer=self.tokenizer, sentence=prompt, prompt_style=self.prompt_style, max_seq_length=self.model.max_seq_length, num_of_eigenvecs=self.num_of_eigenvecs)
+        eig_vecs = torch.from_numpy(
+        np.reshape(eig_vecs, (1, eig_vecs.shape[0], eig_vecs.shape[1]))
+        ).to(self.model.device)
+        len_starting_tokens = torch.tensor([len_starting_tokens]).to(self.model.device)
         prompt_length = input_ids.size(0)
         max_returned_tokens = prompt_length + max_new_tokens
 
@@ -541,6 +564,8 @@ class LLM(torch.nn.Module):
                 top_p=top_p,
                 eos_id=self.preprocessor.tokenizer.eos_id,
                 include_prompt=False,
+                eig_vecs=eig_vecs,
+                len_starting_token_ids=len_starting_tokens
             )
 
         if stream:
