@@ -117,6 +117,7 @@ def setup(
     checkpoint_dir = auto_download_checkpoint(
         model_name=checkpoint_dir, access_token=access_token
     )
+    #precision = "32-true"
     pprint(locals())
     data = Alpaca() if data is None else data
     devices = parse_devices(devices)
@@ -548,8 +549,7 @@ def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
 
-    instruction = "rely-01 :ARG0 they :ARG1 and :op1 have-degree-91 :ARG1 citizen :ARG2 old :ARG3 more :op2 have-degree-91 :ARG1 citizen :ARG2 affluence :ARG3 more"
-    graph_text = "0 1\n0 3\n1 2\n3 4\n4 5\n4 13\n5 6\n6 7\n6 9\n6 11\n7 8\n9 10\n11 12\n13 14\n14 15\n14 17\n14 19\n15 16\n17 18\n19 20\n"
+    instruction, graph_text = select_sft_generate_example(eval=eval, data=data)
     instruction = unidecode(instruction)
     fabric.print(instruction)
     prompt_style = eval.direction
@@ -568,9 +568,12 @@ def generate_example(
         prompt_style=prompt_style_object,
         num_of_eigenvecs=eval.number_of_eigenvecs,
     )
+    eig_vec_dtype = eig_vec.dtype
     eig_vec = torch.from_numpy(
         np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
     ).to(model.device)
+    model_dtype = model.positional_encoding_mlp.fc1.weight.dtype
+    eig_vec = eig_vec.to(dtype=model_dtype)
     len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
     # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
     #     raise ValueError(
