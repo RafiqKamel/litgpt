@@ -75,4 +75,4 @@ def pad_and_concat_eigenvectors(eigenvectors, max_seq_len):
         padded_vector[i][:m] = real_part
         # Place imaginary part in the second half
         padded_vector[i][max_seq_len : max_seq_len + m] = imag_part
-    return padded_vector.astype(np.float32)
+    return padded_vector
