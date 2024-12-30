@@ -937,23 +937,29 @@ def select_sft_generate_example(eval, data):
     if eval.evaluate_example == "first":
         if len(data.test_dataset.data):
             instruction = data.test_dataset.data[0]["instruction"]
+            graph_str = data.test_dataset.data[0]["graph_str"]
         else:
             instruction = data.train_dataset.data[0]["instruction"]
+            graph_str = data.train_dataset.data[0]["graph_str"]
 
     elif eval.evaluate_example == "random":
         if len(data.test_dataset.data):
             random_idx = random.randint(0, len(data.test_dataset.data) - 1)
             instruction = data.test_dataset.data[random_idx]["instruction"]
+            graph_str = data.test_dataset.data[random_idx]["graph_str"]
         else:
             random_idx = random.randint(0, len(data.train_dataset.data) - 1)
             instruction = data.train_dataset.data[random_idx]["instruction"]
+            graph_str = data.train_dataset.data[random_idx]["graph_str"]    
 
     elif isinstance(eval.evaluate_example, int):
         index = eval.evaluate_example
         if len(data.test_dataset.data) > index:
             instruction = data.test_dataset.data[index]["instruction"]
+            graph_str = data.test_dataset.data[index]["graph_str"]
         elif len(data.train_dataset.data) > index:
             instruction = data.train_dataset.data[index]["instruction"]
+            graph_str = data.train_dataset.data[index]["graph_str"]
         else:
             raise IndexError(
                 f"Index {index} is out of range for both test and training datasets."
@@ -961,4 +967,4 @@ def select_sft_generate_example(eval, data):
 
     else:
         raise ValueError(f"Unknown evaluation example type: {eval.evaluate_example}")
-    return instruction
+    return instruction, graph_str
