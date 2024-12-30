@@ -268,7 +268,7 @@ def main(
     optimizer = fabric.setup_optimizers(optimizer)
 
     scheduler = get_lr_scheduler(
-        optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps
+        optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps, eta_min=train.min_lr
     )
     update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=mlp_lr)
     mark_MLP_for_finetuning(model=model)
@@ -610,13 +610,13 @@ def generate_example(
         )
 
 
-def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int):
+def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 1e-6):
     # linear warmup followed by cosine annealing
     scheduler1 = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda step: step / warmup_steps
     )
     scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=(max_steps - warmup_steps)
+        optimizer, T_max=(max_steps - warmup_steps), eta_min=1e-6
     )
     return torch.optim.lr_scheduler.SequentialLR(
         optimizer, [scheduler1, scheduler2], milestones=[warmup_steps]
