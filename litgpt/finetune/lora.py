@@ -610,13 +610,13 @@ def generate_example(
         )
 
 
-def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 1e-6):
+def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 0):
     # linear warmup followed by cosine annealing
     scheduler1 = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda step: step / warmup_steps
     )
     scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=(max_steps - warmup_steps), eta_min=1e-6
+        optimizer, T_max=(max_steps - warmup_steps), eta_min=eta_min
     )
     return torch.optim.lr_scheduler.SequentialLR(
         optimizer, [scheduler1, scheduler2], milestones=[warmup_steps]
