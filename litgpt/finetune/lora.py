@@ -568,7 +568,6 @@ def generate_example(
         prompt_style=prompt_style_object,
         num_of_eigenvecs=eval.number_of_eigenvecs,
     )
-    eig_vec_dtype = eig_vec.dtype
     eig_vec = torch.from_numpy(
         np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
     ).to(model.device)
