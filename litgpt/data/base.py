@@ -75,6 +75,7 @@ class SFTDataset(Dataset):
             else "text2amr" if direction == "text2amr" else prompt_style
         )
         print("prompt_style", prompt_style)
+        print("mask_prompt", mask_prompt)
         self.prompt_style = (
             prompt_style
             if isinstance(prompt_style, PromptStyle)
@@ -99,10 +100,14 @@ class SFTDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Union[Tensor, Dict[str, int]]]:
         example = self.data[idx]
         if self.transform is not None:
-            example = self.transform(example)
-        example["instruction"] = unidecode(example["instruction"])
+            example = self.transform(example)    
+        old_instruction = unidecode(example["instruction"])    
+        processed_instruction = example["instruction"]
+        if "%SPLIT%" in processed_instruction:
+            processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
+        processed_instruction = unidecode(processed_instruction)    
         example["output"] = unidecode(example["output"])
-        prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
+        prompt = self.prompt_style.apply(prompt=processed_instruction, **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
             example["output"], bos=False, eos=True, max_length=self.max_seq_length
@@ -124,7 +129,7 @@ class SFTDataset(Dataset):
 
         raw_token_count = len(
             self.tokenizer.encode(
-                example["instruction"], max_length=self.max_seq_length
+                processed_instruction, max_length=self.max_seq_length
             )
         ) + len(encoded_response)
 
@@ -139,7 +144,7 @@ class SFTDataset(Dataset):
                 prepare_eigvecs_datapoint(
                     tokenizer=self.tokenizer,
                     graph_str=example["graph_str"],
-                    sentence=example["instruction"],
+                    sentence=old_instruction,
                     prompt_style=self.prompt_style,
                     max_seq_length=self.max_seq_length,
                     num_of_eigenvecs=self.num_of_eigenvecs,
