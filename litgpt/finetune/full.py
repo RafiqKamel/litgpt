@@ -38,8 +38,10 @@ from litgpt.utils import (
     save_hyperparameters,
     select_sft_generate_example,
 )
-
-
+from litgpt.new_utils import update_positional_mlp_lr, prepare_eigvecs_datapoint, mark_MLP_for_finetuning
+from litgpt.prompts import PromptStyle
+import numpy as np
+from unidecode import unidecode
 def setup(
     checkpoint_dir: Path,
     out_dir: Path = Path("out/finetune/full"),
@@ -136,7 +138,9 @@ def main(
     optimizer: Union[str, Dict],
 ) -> None:
     validate_args(train, eval)
-
+    eval.direction = train.direction
+    eval.number_of_eigenvecs = train.number_of_eigenvecs
+    mlp_lr = train.mlp_lr
     tokenizer = Tokenizer(checkpoint_dir)
     train_dataloader, val_dataloader = get_dataloaders(fabric, data, tokenizer, train)
     steps_per_epoch = len(train_dataloader) // train.gradient_accumulation_iters(devices)
@@ -148,16 +152,21 @@ def main(
         os.makedirs(out_dir, exist_ok=True)
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
+    if train.number_of_eigenvecs == -1:
+        eig_vec_size = train.max_seq_length * 2
+    else:
+        eig_vec_size = train.number_of_eigenvecs * 2
     with fabric.init_module(empty_init=(fabric.world_size > 1)):
-        model = GPT(config)
+        model = GPT(config, eig_vec_size=eig_vec_size)
 
     fabric.print(f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}")
 
     model = fabric.setup(model)
 
-    optimizer = instantiate_torch_optimizer(optimizer, model.parameters())
+    optimizer = instantiate_torch_optimizer(optimizer, model.parameters(), pe_mlp_lr=mlp_lr, model_named_params=model.named_parameters())
     optimizer = fabric.setup_optimizers(optimizer)
-    scheduler = get_lr_scheduler(optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps)
+    scheduler = get_lr_scheduler(optimizer, warmup_steps=train.lr_warmup_steps, max_steps=lr_max_steps, eta_min=train.min_lr)
+    mark_MLP_for_finetuning(model=model)
     state = {"model": model, "optimizer": optimizer, "scheduler": scheduler, "iter_num": 0, "step_count": 0}
 
     resume = find_resume_path(resume, out_dir)
@@ -165,7 +174,7 @@ def main(
         fabric.print(f"Resuming training from {resume}")
         fabric.load(resume, state)
     else:
-        load_checkpoint(fabric, state["model"], checkpoint_path)
+        load_checkpoint(fabric, state["model"], checkpoint_path, strict=False)
 
     train_time = time.perf_counter()
     token_counts = fit(fabric, state, train_dataloader, val_dataloader, devices, resume, checkpoint_dir, out_dir, train, eval, data)
@@ -258,14 +267,20 @@ def fit(
         if train_iterator.epoch >= train.epochs:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-
+        eig_vecs = batch["eigvecs"]
+        len_starting_token_ids = batch["len_starting_token_ids"]
         is_accumulating = state["iter_num"] % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
-            logits = model(input_ids)
+            logits = model(input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids)
             # shift the targets such that output n predicts token n+1
             loss = chunked_cross_entropy(logits[..., :-1, :], targets[..., 1:])
             fabric.backward(loss / train.gradient_accumulation_iters(devices))
-
+        param_to_name = {p: n for n, p in model.named_parameters()}
+        # Print parameter names and learning rates
+        for i, param_group in enumerate(optimizer.param_groups):
+            example_param = param_group['params'][0]
+            name = param_to_name.get(example_param, "Unknown")
+            print(f"Parameter group {i} containing {name}: Learning rate = {param_group['lr']:.2e}")
         running_loss.update(loss.detach())
 
         if not is_accumulating:
@@ -291,6 +306,8 @@ def fit(
                 "total_tokens": token_counts["raw_tokens_plus_prompt_template"] * fabric.world_size,
                 "learning_rate": scheduler.get_last_lr()[0],
             }
+            curr_mlp_lr = scheduler.get_last_lr()[0] *train.mlp_lr_multiplier if scheduler.get_last_lr()!=0 else train.mlp_lr
+            update_positional_mlp_lr(optimizer=optimizer, model=model, new_lr=curr_mlp_lr) 
             if isinstance(val_loss, torch.Tensor):
                 val_loss = f"{val_loss:.3f}"
             fabric.print(
@@ -339,21 +356,51 @@ def validate(fabric: L.Fabric, model: GPT, val_dataloader: DataLoader, eval: Eva
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        logits = model(input_ids)
+        eig_vecs, len_starting_token_ids = batch["eigvecs"], batch["len_starting_token_ids"]
+        logits = model(input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids)
         losses[k] = chunked_cross_entropy(logits[..., :-1, :], targets[..., 1:], chunk_size=0)
 
     val_loss = losses.mean()
+    # check if all params have requires_grad=False
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            fabric.print(f"WARNING: {name} has requires_grad=True")
     model.train()
     return val_loss
 
 
 @torch.no_grad()
 def generate_example(fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule):
-    instruction = select_sft_generate_example(eval, data)
+    instruction, graph_text = select_sft_generate_example(eval=eval, data=data)
+    instruction = unidecode(instruction)
     fabric.print(instruction)
-    prompt = data.prompt_style.apply(instruction)
+    prompt_style = eval.direction
+    prompt_style_object = (
+        prompt_style
+        if isinstance(prompt_style, PromptStyle)
+        else PromptStyle.from_name(prompt_style)
+    )
+    prompt = prompt_style_object.apply(instruction)
     encoded = tokenizer.encode(prompt, device=fabric.device)
+    eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
+        graph_str=graph_text,
+        tokenizer=tokenizer,
+        sentence=instruction,
+        max_seq_length=model.max_seq_length,
+        prompt_style=prompt_style_object,
+        num_of_eigenvecs=eval.number_of_eigenvecs,
+    )
+    eig_vec = torch.from_numpy(
+        np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
+    ).to(model.device)
+    model_dtype = model.positional_encoding_mlp.fc1.weight.dtype
+    eig_vec = eig_vec.to(dtype=model_dtype)
+    len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
     model.eval()
+    # check if all params have requires_grad=False
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            fabric.print(f"WARNING: {name} has requires_grad=True")
 
     with fabric.init_tensor():
         # do not set `max_seq_length=max_returned_token` because memory is not a concern here
@@ -366,7 +413,7 @@ def generate_example(fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: E
             # do not set `max_seq_length=max_returned_token` because memory is not a concern here
             model.set_kv_cache(batch_size=1)
         output = generate(
-            model, encoded, max_returned_tokens=max_returned_tokens, temperature=0.8, eos_id=tokenizer.eos_id
+            model, encoded, max_returned_tokens=max_returned_tokens, temperature=0.8, eos_id=tokenizer.eos_id, eig_vecs=eig_vec, len_starting_token_ids=len_starting_token_ids,
         )
         model.clear_kv_cache()
         model.train()
@@ -380,11 +427,18 @@ def generate_example(fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: E
         )
 
 
-def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int):
+def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 0):
     # linear warmup followed by cosine annealing
-    scheduler1 = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: step / warmup_steps)
-    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(max_steps - warmup_steps))
-    return torch.optim.lr_scheduler.SequentialLR(optimizer, [scheduler1, scheduler2], milestones=[warmup_steps])
+    scheduler1 = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda step: step / warmup_steps
+    )
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=(max_steps - warmup_steps), eta_min=eta_min
+    )
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer, [scheduler1, scheduler2], milestones=[warmup_steps]
+    )
+
 
 
 def get_dataloaders(
@@ -393,7 +447,7 @@ def get_dataloaders(
     data.connect(tokenizer=tokenizer, batch_size=train.micro_batch_size, max_seq_length=train.max_seq_length)
     with fabric.rank_zero_first():
         data.prepare_data()
-    data.setup()
+    data.setup(direction = train.direction, num_of_eigenvecs = train.number_of_eigenvecs)
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
     train_dataloader, val_dataloader = fabric.setup_dataloaders(train_dataloader, val_dataloader)
