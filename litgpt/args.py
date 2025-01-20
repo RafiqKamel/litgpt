@@ -97,7 +97,7 @@ class TrainArgs:
 class EvalArgs:
     """Evaluation-related arguments"""
 
-    interval: int = 3600
+    interval: int = 1000
     """Number of optimizer steps between evaluation calls"""
     max_new_tokens: Optional[int] = None
     """Number of tokens to generate"""
