@@ -95,8 +95,17 @@ def positional_encoding(
     return encoding
 
 
-def create_indexing_map(sentence: str, tokenizer):
-    tokens = sentence.split()
+def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
+    if "%SPLIT%" in sentence:
+        tokens = sentence.split("%SPLIT%")
+        sentence = sentence.replace("%SPLIT%", " ")
+    else:    
+        tokens = sentence.split()
+    if len(tokens) != num_of_nodes:
+        print(tokens)
+        print(num_of_nodes)
+        raise ValueError(f"Number of nodes mismatch: {len(tokens)} != {num_of_nodes}")
+        
     ids = tokenizer.encode(sentence)
     subtokens = [tokenizer.decode(id) for id in ids]
 
@@ -127,11 +136,11 @@ def strip_string(string):
     return string.replace(" ", "")
 
 
-def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs):
+def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs, num_of_nodes):
     if len(eigvecs) == len(tokenizer.encode(sentence)):
         indexing_map = {i: [i] for i in range(len(eigvecs))}
     else:
-        indexing_map = create_indexing_map(sentence, tokenizer)
+        indexing_map = create_indexing_map(sentence, tokenizer, num_of_nodes)
     subtoken_eigvecs = []
     global_subtoken_index = 0
     for i, eigvec in enumerate(eigvecs):
@@ -162,7 +171,7 @@ def prepare_eigvecs_datapoint(
     G = recreate_graph(edge_list_str=graph_str)
     eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_len=max_seq_length, num_of_eigenvecs=num_of_eigenvecs)
     subtoken_eigvecs = process_eigenvectors_subtokens(
-        tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs
+        tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs, num_of_nodes=len(G.nodes)
     )
     starting_token = prompt_style.starting_token()
     starting_token_ids = tokenizer.encode(starting_token)
