@@ -324,7 +324,7 @@ class AMR2Text(PromptStyle):
         return (
             f"<AMR-to-Text>\n"
             f"[Task: AMR-to-Text]\n"
-            f"[Instruction] Convert the following AMR into natural language text.\n"
+            f"[Instruction] Convert the following Abstract Meaning Representation into natural language text.\n"
             f"[Input: AMR]\n"
         )
 
