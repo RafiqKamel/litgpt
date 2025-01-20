@@ -117,7 +117,6 @@ class GPT(nn.Module):
             for i in range(x.shape[0]):  # Iterate over each batch
                 single_eig_vecs = torch.Tensor(eig_vecs[i]).to(x.device)
                 positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
-                # normalize the positional encoding
                 start_idx = len_starting_token_ids[
                     i
                 ]  # Get the starting token index for the i-th batch
