@@ -550,7 +550,16 @@ def generate_example(
 ):
 
     instruction, graph_text = select_sft_generate_example(eval=eval, data=data)
-    instruction = unidecode(instruction)
+    old_instruction = unidecode(instruction)    
+    processed_instruction = instruction
+    if "%SPLIT%" in processed_instruction:
+        processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
+    processed_instruction = unidecode(processed_instruction)
+    old_instruction = unidecode(instruction)
+    if "%SPLIT%" in old_instruction:
+        instruction = old_instruction.split("%SPLIT%")
+    else: 
+        instruction = old_instruction    
     fabric.print(instruction)
     prompt_style = eval.direction
     prompt_style_object = (
@@ -558,12 +567,12 @@ def generate_example(
         if isinstance(prompt_style, PromptStyle)
         else PromptStyle.from_name(prompt_style)
     )
-    prompt = prompt_style_object.apply(instruction)
+    prompt = prompt_style_object.apply(processed_instruction)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
         graph_str=graph_text,
         tokenizer=tokenizer,
-        sentence=instruction,
+        sentence=old_instruction,
         max_seq_length=model.max_seq_length,
         prompt_style=prompt_style_object,
         num_of_eigenvecs=eval.number_of_eigenvecs,
