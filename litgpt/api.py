@@ -39,7 +39,7 @@ from litgpt.utils import (
 )
 from litgpt.new_utils import prepare_eigvecs_datapoint, load_properties_from_yaml
 
-
+from unidecode import unidecode
 class LLM(torch.nn.Module):
     def __init__(
         self,
@@ -578,6 +578,7 @@ class LLM(torch.nn.Module):
     def _text_to_token_ids(self, prompt):
         """Utility method to convert a prompt text to token IDs"""
         prompt = self.prompt_style.apply(prompt)
+        prompt = unidecode(prompt)    
         input_ids = self.preprocessor.encode(prompt)
         return input_ids
 
