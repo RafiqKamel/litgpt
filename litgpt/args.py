@@ -97,16 +97,16 @@ class TrainArgs:
 class EvalArgs:
     """Evaluation-related arguments"""
 
-    interval: int = 600
+    interval: int = 3600
     """Number of optimizer steps between evaluation calls"""
     max_new_tokens: Optional[int] = None
     """Number of tokens to generate"""
-    max_iters: int = 100
+    max_iters: int = 500
     """Number of iterations"""
     initial_validation: bool = False
     """Whether to evaluate on the validation set at the beginning of the training"""
     final_validation: bool = True
     """Whether to evaluate on the validation set at the end of the training"""
-    evaluate_example: Union[str, int] = "first"
+    evaluate_example: Union[str, int] = "random"
     """How to pick an example instruction to evaluate periodically during training.
        Can be "first", "random", or an integer index to pick a specific example."""
