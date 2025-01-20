@@ -550,17 +550,16 @@ def generate_example(
 ):
 
     instruction, graph_text = select_sft_generate_example(eval=eval, data=data)
+    print("Instruction: ", instruction)
     old_instruction = unidecode(instruction)    
     processed_instruction = instruction
     if "%SPLIT%" in processed_instruction:
         processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
     processed_instruction = unidecode(processed_instruction)
-    old_instruction = unidecode(instruction)
-    if "%SPLIT%" in old_instruction:
-        instruction = old_instruction.split("%SPLIT%")
-    else: 
-        instruction = old_instruction    
-    fabric.print(instruction)
+    old_instruction = unidecode(instruction)  
+    print("Processed Instruction: ", processed_instruction)
+    print("Old Instruction: ", old_instruction)
+    fabric.print(processed_instruction)
     prompt_style = eval.direction
     prompt_style_object = (
         prompt_style
