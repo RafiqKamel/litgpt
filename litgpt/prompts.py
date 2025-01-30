@@ -319,7 +319,37 @@ class SmolLM2(ChatML):
 class Salamandra(ChatML):
     def __init__(self):
         super().__init__("I am Salamandra, an AI language model developed at the Barcelona Supercomputing Centre (BSC) by the Language Technologies Unit. My knowledge base was last updated on August 2023. Today Date: 2024-09-30\nSoy Salamandra, un modelo lingüístico de IA desarrollado en el Barcelona Supercomputing Centre (BSC) por la Language Technologies Unit. Mi base de conocimientos se actualizó por última vez en agosto de 2023.\nSoc Salamandra, un model de llenguatge d'IA desenvolupat al Barcelona Supercomputing Centre (BSC) per la Language Technologies Unit.")
-
+    
+class GeneralAMR(PromptStyle):
+    
+    def apply(self, prompt: str, direction:str, **kwargs: str) -> str:
+        if direction == "amr2text":
+            return f"{self.amr2text_starting_token()}{prompt}{self.amr2text_ending_token()}"
+        elif direction == "text2amr":
+            return f"{self.text2amr_starting_token()}{prompt}{self.text2amr_ending_token()}"
+        
+    def amr2text_starting_token(self) -> str:
+        return (
+            f"<AMR-to-Text>\n"
+            f"[Task: AMR-to-Text]\n"
+            f"[Instruction] Convert the following Abstract Meaning Representation into natural language text.\n"
+            f"[Input: AMR]\n"
+        )
+        
+    def amr2text_ending_token(self) -> str:
+        return "\n[Output: Text]\n"
+    
+    
+    def text2amr_starting_token(self) -> str:
+        return (
+            f"<Text-to-AMR>\n"
+            f"[Task: Text-to-AMR]\n"
+            f"[Instruction] Convert the following natural language text into Abstract Meaning Representation.\n"
+            f"[Input: Text]\n"
+        )
+        
+    def text2amr_ending_token(self) -> str:
+        return "\n[Output: AMR]\n"        
 
 # Maps prompt style names to PromptStyle classes
 prompt_styles: Dict[str, Type[PromptStyle]] = {
@@ -350,6 +380,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "qwq": QwQ,
     "smollm2": SmolLM2,
     "salamandra": Salamandra,
+    "general_amr": GeneralAMR,
 }
 
 
