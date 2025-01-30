@@ -51,7 +51,8 @@ from litgpt.new_utils import (
 from litgpt.prompts import PromptStyle
 import numpy as np
 from unidecode import unidecode
-
+from litgpt.eval_metrics import bleu_scoring, spring_bleu_scoring, raw_corpus_bleu
+import pandas as pd
 
 def setup(
     checkpoint_dir: Path,
@@ -311,6 +312,7 @@ def main(
             model,
             val_dataloader,
             dataclasses.replace(eval, max_iters=len(val_dataloader)),
+            tokenizer=tokenizer,
         )
         metrics = {"val_loss": val_loss, "val_ppl": math.exp(val_loss)}
         fabric.log_dict(metrics)
@@ -364,6 +366,7 @@ def fit(
             model,
             val_dataloader,
             dataclasses.replace(eval, max_iters=len(val_dataloader)),
+            tokenizer=tokenizer,
         )
         val_loss = f"{val_loss:.3f}"
     else:
@@ -374,6 +377,7 @@ def fit(
             val_dataloader,
             dataclasses.replace(eval, max_iters=2),
             verbose=False,
+            tokenizer=tokenizer,
         )  # sanity check
         val_loss = "n/a"
 
@@ -481,7 +485,7 @@ def fit(
 
         if not is_accumulating and step_count % eval.interval == 0:
             t0 = time.perf_counter()
-            val_loss = validate(fabric, model, val_dataloader, eval)
+            val_loss = validate(fabric, model, val_dataloader, eval, tokenizer=tokenizer)
             generate_example(fabric, model, tokenizer, eval, data)
             t1 = time.perf_counter() - t0
             fabric.print(
@@ -520,26 +524,64 @@ def validate(
     val_dataloader: DataLoader,
     eval: EvalArgs,
     verbose: bool = True,
+    tokenizer: Optional[Tokenizer] = None,
 ) -> torch.Tensor:
     if verbose:
         fabric.print("Validating ...")
     model.eval()
     losses = torch.zeros(min(len(val_dataloader), eval.max_iters))
+    outputs = []
+    predicted_outputs = []
+    outputs_cut = []
+    predicted_outputs_cut = []
+    non_valid_number = 0
     for k, batch in enumerate(val_dataloader):
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
         eig_vecs = batch["eigvecs"]
+        output = batch["output"][0]
+        
+        outputs.append(output)
         len_starting_token_ids = batch["len_starting_token_ids"]
         logits = model(
             input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids
         )
+        token_ids = torch.argmax(logits, dim=-1) 
+        predicted_output = tokenizer.decode(token_ids.squeeze())
+        print("Predicted Output: ", predicted_output)
+        if "[Output: Text]" in predicted_output:
+            predicted_output_cut = predicted_output.split("[Output: Text]")[1]
+            predicted_outputs_cut.append(predicted_output_cut)
+            output_cut = output.split("[Output: Text]")[1]
+            outputs_cut.append(output_cut)        
+        else:
+            non_valid_number += 1       
+        predicted_outputs.append(predicted_output)
         losses[k] = chunked_cross_entropy(
             logits[..., :-1, :], targets[..., 1:], chunk_size=0
         )
 
     val_loss = losses.mean()
-
+    #bleu = bleu_scoring(preds=predicted_outputs, gold=outputs, tokenizer=tokenizer)
+    spring_bleu = spring_bleu_scoring(preds=predicted_outputs, gold=outputs)
+    raw_corpus_bleu_score = raw_corpus_bleu(hypothesis=predicted_outputs, reference=outputs)
+    #print("BLEU Score: ", bleu)
+    print("Spring BLEU Score: ", spring_bleu)
+    print("Raw Corpus BLEU Score: ", raw_corpus_bleu_score)
+    if len(outputs_cut) > 0:
+        spring_bleu_cuts = spring_bleu_scoring(preds=predicted_outputs_cut, gold=outputs_cut)
+        raw_corpus_bleu_score_cuts = raw_corpus_bleu(hypothesis=predicted_outputs_cut, reference=outputs_cut)
+        print("Spring BLEU Score Cuts: ", spring_bleu_cuts)
+        print("Raw Corpus BLEU Score Cuts: ", raw_corpus_bleu_score_cuts)
+    print("valid cut output number: ", len(predicted_outputs_cut))
+    print("non valid cut output number: ", non_valid_number)
+    if len(outputs_cut) > 1000:
+        df = pd.DataFrame()
+        df["pred"] = predicted_outputs_cut
+        df["gold"] = outputs_cut
+        time = str(pd.Timestamp.now())
+        df.to_csv(f"outputs_{time}.csv")
     model.train()
     return val_loss
 
