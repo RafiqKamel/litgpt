@@ -549,8 +549,7 @@ def validate(
         )
         token_ids = torch.argmax(logits, dim=-1) 
         predicted_output = tokenizer.decode(token_ids.squeeze())
-        print("Predicted Output: ", predicted_output)
-        if "[Output: Text]" in predicted_output:
+        if "[Output: Text]" in predicted_output and len(predicted_output.split("[Output: Text]")) == 2:
             predicted_output_cut = predicted_output.split("[Output: Text]")[1]
             predicted_outputs_cut.append(predicted_output_cut)
             output_cut = output.split("[Output: Text]")[1]
