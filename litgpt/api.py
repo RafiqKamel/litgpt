@@ -506,6 +506,8 @@ class LLM(torch.nn.Module):
                 "or .trainer_setup() method to initialize the model."
             )
         input_ids = self._text_to_token_ids(prompt)
+        prompt = unidecode(prompt)   
+        print("prompt: ", prompt) 
         eig_vecs, len_starting_tokens,_ = prepare_eigvecs_datapoint(graph_str=graph_str, tokenizer=self.tokenizer, sentence=prompt, prompt_style=self.prompt_style, max_seq_length=self.model.max_seq_length, num_of_eigenvecs=self.num_of_eigenvecs)
         eig_vecs = torch.from_numpy(
         np.reshape(eig_vecs, (1, eig_vecs.shape[0], eig_vecs.shape[1]))
@@ -573,12 +575,17 @@ class LLM(torch.nn.Module):
         elif return_as_token_ids:
             return outputs
         else:
-            return self.preprocessor.decode(outputs)
+            output = self.preprocessor.decode(outputs)
+            print("output: ", output)
+            return output
 
     def _text_to_token_ids(self, prompt):
         """Utility method to convert a prompt text to token IDs"""
+        if "%SPLIT%" in prompt:
+            prompt = prompt.replace("%SPLIT%", " ")
+        prompt = unidecode(prompt)
         prompt = self.prompt_style.apply(prompt)
-        prompt = unidecode(prompt)    
+        print("processed prompt: ", prompt)
         input_ids = self.preprocessor.encode(prompt)
         return input_ids
 
