@@ -11,7 +11,7 @@ from litgpt.magentic_laplacian_utils import (
 import torch
 import yaml
 import unicodedata
-
+import re
 
 
 def recreate_graph(edge_list_str: str):
@@ -95,12 +95,15 @@ def positional_encoding(
     return encoding
 
 
+def split_preserve_quotes(s):
+    return re.findall(r'\".*?\"|\S+', s)
+
 def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
     if "%SPLIT%" in sentence:
         tokens = sentence.split("%SPLIT%")
         sentence = sentence.replace("%SPLIT%", " ")
     else:    
-        tokens = sentence.split()
+        tokens = split_preserve_quotes(sentence)
     if len(tokens) != num_of_nodes:
         print(tokens)
         print(num_of_nodes)
