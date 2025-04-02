@@ -15,7 +15,7 @@ from typing_extensions import Self
 
 from litgpt.config import Config
 from litgpt.positional_encodings_config import sinousidial_encodings_dim, add_positional_encodings
-
+from litgpt.new_utils import prepare_eigvecs_datapoint
 
 class GPT(nn.Module):
     def __init__(self, config: Config, eig_vec_size: int) -> None:
@@ -86,8 +86,9 @@ class GPT(nn.Module):
     def forward(
         self,
         idx: torch.Tensor,
-        eig_vecs: torch.Tensor,
         len_starting_token_ids: int,
+        graph_str: str,
+        indexing_map: dict,
         input_pos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         T = idx.size(1)
@@ -114,9 +115,20 @@ class GPT(nn.Module):
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         
         if add_positional_encodings:
-            for i in range(x.shape[0]):  # Iterate over each batch
-                single_eig_vecs = torch.Tensor(eig_vecs[i]).to(x.device)
+          for i in range(x.shape[0]):  # Iterate over each batch
+                single_eig_vecs = prepare_eigvecs_datapoint(
+                    graph_str=graph_str[i],
+                    indexing_map=indexing_map[i],
+                    max_seq_length=self.max_seq_length,
+                    num_of_eigenvecs=self.eig_vec_size//2,
+                )    
+                single_eig_vecs = torch.Tensor(single_eig_vecs).to(x.device)
+                #single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
                 positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
+                # normalize the positional encoding
+                # positional_encodings = positional_encodings / positional_encodings.norm(
+                # dim=-1, keepdim=True
+                # )
                 start_idx = len_starting_token_ids[
                     i
                 ]  # Get the starting token index for the i-th batch
@@ -128,7 +140,8 @@ class GPT(nn.Module):
                 else:
                     print("Warning: Sequence length is less than the positional encodings")
         else:
-            print("Positional encodings are not added to the input")            
+            print("Not adding positional encodings")   
+                   
         if self.config.scale_embeddings:
             x = x * torch.tensor(self.config.n_embd**0.5, dtype=x.dtype)
 

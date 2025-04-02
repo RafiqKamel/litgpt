@@ -37,7 +37,7 @@ from litgpt.utils import (
     load_checkpoint,
     save_config,
 )
-from litgpt.new_utils import prepare_eigvecs_datapoint, load_properties_from_yaml
+from litgpt.new_utils import load_properties_from_yaml, starting_token_len, recreate_graph, create_indexing_map
 
 from unidecode import unidecode
 class LLM(torch.nn.Module):
@@ -96,12 +96,13 @@ class LLM(torch.nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
+        graph_str: Optional[str],
+        indexing_map: Optional[List[int]],
         target_ids: Optional[torch.Tensor] = None,
         loss_fn: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        eig_vecs: Optional[torch.Tensor] = None,
         len_starting_tokens: Optional[int] = None
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        logits = self.model(input_ids, eig_vecs=eig_vecs, len_starting_tokens=len_starting_tokens)
+        logits = self.model(input_ids, graph_str=graph_str, indexing_map=indexing_map, len_starting_tokens=len_starting_tokens)
         if target_ids is not None:
             if loss_fn is None:
                 loss_fn = chunked_cross_entropy
@@ -464,13 +465,14 @@ class LLM(torch.nn.Module):
     def generate(
         self,
         prompt: str,
+        graph_str: Optional[str] = None ,
         max_new_tokens: int = 50,
         temperature: float = 1.0,
         top_k: Optional[int] = None,
         top_p: float = 1.0,
         return_as_token_ids: bool = False,
         stream: bool = False,
-        graph_str: Optional[str] = None 
+
     ) -> Union[str, torch.Tensor]:
         """
         Takes a conditioning sequence (prompt) as input and continues to generate as many tokens as requested.
@@ -505,14 +507,23 @@ class LLM(torch.nn.Module):
                 "The model is not initialized yet; use the .distribute() "
                 "or .trainer_setup() method to initialize the model."
             )
-        input_ids = self._text_to_token_ids(prompt)
+        input_ids = self._text_to_token_ids(prompt) #make sure you parse this into batch
         prompt = unidecode(prompt)   
-        print("prompt: ", prompt) 
-        eig_vecs, len_starting_tokens,_ = prepare_eigvecs_datapoint(graph_str=graph_str, tokenizer=self.tokenizer, sentence=prompt, prompt_style=self.prompt_style, max_seq_length=self.model.max_seq_length, num_of_eigenvecs=self.num_of_eigenvecs)
-        eig_vecs = torch.from_numpy(
-        np.reshape(eig_vecs, (1, eig_vecs.shape[0], eig_vecs.shape[1]))
-        ).to(self.model.device)
+        #input_ids = input_ids.cpu().numpy() if isinstance(input_ids, torch.Tensor) else input_ids
+        # input_ids = torch.from_numpy(
+        # np.reshape(input_ids, (1, input_ids.shape[0]))
+        # ).to(self.model.device)
+        len_starting_tokens, _ = starting_token_len(
+                    tokenizer=self.preprocessor.tokenizer, prompt_style=self.prompt_style
+         )
         len_starting_tokens = torch.tensor([len_starting_tokens]).to(self.model.device)
+        G = recreate_graph(edge_list_str=graph_str)
+        num_nodes = len(G.nodes)
+        indexing_map = create_indexing_map(
+        sentence=prompt, tokenizer=self.preprocessor.tokenizer, num_of_nodes=num_nodes
+    )
+        indexing_map = [indexing_map]
+        graph_str = [graph_str]
         prompt_length = input_ids.size(0)
         max_returned_tokens = prompt_length + max_new_tokens
 
@@ -546,6 +557,7 @@ class LLM(torch.nn.Module):
                 top_k=top_k,
                 top_p=top_p,
                 stop_tokens=([self.preprocessor.tokenizer.eos_id],),
+                
             )
             if return_as_token_ids:
                 yield from outputs
@@ -566,8 +578,10 @@ class LLM(torch.nn.Module):
                 top_p=top_p,
                 eos_id=self.preprocessor.tokenizer.eos_id,
                 include_prompt=False,
-                eig_vecs=eig_vecs,
-                len_starting_token_ids=len_starting_tokens
+                len_starting_token_ids=len_starting_tokens,
+                graph_str=graph_str,
+                indexing_map= indexing_map,
+                
             )
 
         if stream:
@@ -575,6 +589,7 @@ class LLM(torch.nn.Module):
         elif return_as_token_ids:
             return outputs
         else:
+            
             output = self.preprocessor.decode(outputs)
             print("output: ", output)
             return output

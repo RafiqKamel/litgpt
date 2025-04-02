@@ -21,7 +21,6 @@ def recreate_graph(edge_list_str: str):
         return graph
     # Split the string into lines
     edge_list_lines = edge_list_str.strip().split("\n")
-
     # Create a list of edge tuples
     edges = [tuple(map(int, line.split())) for line in edge_list_lines]
 
@@ -99,6 +98,9 @@ def split_preserve_quotes(s):
     return re.findall(r'\".*?\"|\S+', s)
 
 def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
+    if num_of_nodes == len(tokenizer.encode(sentence)):
+        print("No need to process eigenvectors", flush=True)
+        return {i: [i] for i in range(num_of_nodes)}
     if "%SPLIT%" in sentence:
         tokens = sentence.split("%SPLIT%")
         sentence = sentence.replace("%SPLIT%", " ")
@@ -139,11 +141,10 @@ def strip_string(string):
     return string.replace(" ", "")
 
 
-def process_eigenvectors_subtokens(tokenizer, sentence, eigvecs, num_of_nodes):
-    if len(eigvecs) == len(tokenizer.encode(sentence)):
-        indexing_map = {i: [i] for i in range(len(eigvecs))}
-    else:
-        indexing_map = create_indexing_map(sentence, tokenizer, num_of_nodes)
+
+def process_eigenvectors_subtokens( eigvecs, num_of_nodes, indexing_map):
+    if len(eigvecs) != num_of_nodes:
+        print("Number of nodes mismatch", eigvecs.shape, num_of_nodes, flush=True)
     subtoken_eigvecs = []
     global_subtoken_index = 0
     for i, eigvec in enumerate(eigvecs):
@@ -169,18 +170,20 @@ def create_edge_list_sequence(n_tokens):
 
 
 def prepare_eigvecs_datapoint(
-    tokenizer, graph_str, sentence, prompt_style, max_seq_length, num_of_eigenvecs
+    graph_str, max_seq_length, num_of_eigenvecs, indexing_map
 ):
     G = recreate_graph(edge_list_str=graph_str)
     eigvecs = magnetic_laplacian_eigenvectors(g=G, max_seq_len=max_seq_length, num_of_eigenvecs=num_of_eigenvecs)
     subtoken_eigvecs = process_eigenvectors_subtokens(
-        tokenizer=tokenizer, sentence=sentence, eigvecs=eigvecs, num_of_nodes=len(G.nodes)
+        eigvecs=eigvecs, num_of_nodes=len(G.nodes), indexing_map=indexing_map
     )
+    return subtoken_eigvecs
+
+def starting_token_len(prompt_style, tokenizer):
     starting_token = prompt_style.starting_token()
     starting_token_ids = tokenizer.encode(starting_token)
     len_starting_token_ids = len(starting_token_ids)
-    return subtoken_eigvecs, len_starting_token_ids, starting_token_ids
-
+    return len_starting_token_ids, starting_token_ids
 
 def update_positional_mlp_lr(
     optimizer, model, new_lr, target_module_name="positional_encoding_mlp"

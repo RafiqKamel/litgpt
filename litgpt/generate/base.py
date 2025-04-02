@@ -80,7 +80,8 @@ def sample(
 
 def next_token(
     model: GPT,
-    eig_vec: torch.Tensor,
+    graph_str,
+    indexing_map,
     input_pos: torch.Tensor,
     len_starting_token: torch.Tensor,
     x: torch.Tensor,
@@ -89,7 +90,8 @@ def next_token(
     logits = model(
         idx=x,
         input_pos=input_pos,
-        eig_vecs=eig_vec,
+        graph_str=graph_str,
+        indexing_map=indexing_map,
         len_starting_token_ids=len_starting_token,
     )
     _next = sample(logits, **kwargs)
@@ -149,7 +151,8 @@ def generate_fn(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
-    eig_vecs: torch.Tensor,
+    graph_str: str,
+    indexing_map: dict,
     len_starting_token_ids: torch.Tensor,
     *,
     temperature: float = 1.0,
@@ -205,7 +208,8 @@ def generate_fn(
         # Generate the token
         new_token = next_token(
             model= model,
-            eig_vec=eig_vecs,
+            graph_str=graph_str,
+            indexing_map=indexing_map,
             input_pos=None,
             len_starting_token=len_starting_token_ids,
             x=token.view(1, -1),
@@ -415,7 +419,8 @@ def generate(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
-    eig_vecs: torch.Tensor,
+    graph_str,
+    indexing_map,
     len_starting_token_ids: torch.Tensor,
     *,
     temperature: float = 1.0,
@@ -451,7 +456,6 @@ def generate(
         eos_id: If specified, stop generating any more token once the <eos> token is triggered.
         include_prompt: If true (default) prepends the prompt (after applying the prompt style) to the output.
     """
-
     token_list = list(
         generate_fn(
             include_prompt=include_prompt,
@@ -463,7 +467,8 @@ def generate(
             top_k=top_k,
             top_p=top_p,
             stop_tokens=(([eos_id],) if eos_id is not None else ()),
-            eig_vecs=eig_vecs,
+            graph_str=graph_str,
+            indexing_map=indexing_map,
             len_starting_token_ids=len_starting_token_ids,
         )
     )

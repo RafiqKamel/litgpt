@@ -61,7 +61,7 @@ from litgpt.model import KVCache
 from litgpt.utils import map_old_state_dict_weights
 from litgpt.model import PositionalEncodingMLP
 from litgpt.positional_encodings_config import sinousidial_encodings_dim, add_positional_encodings
-
+from litgpt.new_utils import prepare_eigvecs_datapoint
 
 class LoRALayer(nn.Module):
     def __init__(self, r: int, lora_alpha: int, lora_dropout: float):
@@ -580,10 +580,12 @@ class GPT(BaseModel):
     def forward(
         self,
         idx: torch.Tensor,
-        eig_vecs: torch.Tensor,
         len_starting_token_ids: int,
+        graph_str: Optional[str],
+        indexing_map: Optional[Dict[str, int]],
         input_pos: Optional[torch.Tensor] = None,
         lm_head_chunk_size: int = 0,
+        
     ) -> Union[torch.Tensor, List[torch.Tensor]]:
         T = idx.size(1)
         if self.max_seq_length < T:
@@ -609,7 +611,13 @@ class GPT(BaseModel):
         # shifting the pos_encodings to the right to account for the added <AMR> token
         if add:
             for i in range(x.shape[0]):  # Iterate over each batch
-                single_eig_vecs = torch.Tensor(eig_vecs[i]).to(x.device)
+                single_eig_vecs = prepare_eigvecs_datapoint(
+                    graph_str=graph_str[i],
+                    indexing_map=indexing_map[i],
+                    max_seq_length=self.max_seq_length,
+                    num_of_eigenvecs=self.eig_vec_size//2,
+                )    
+                single_eig_vecs = torch.Tensor(single_eig_vecs).to(x.device)
                 #single_eig_vecs = single_eig_vecs / torch.norm(single_eig_vecs, dim=-1, keepdim=True)
                 positional_encodings = self.positional_encoding_mlp(single_eig_vecs)
                 # normalize the positional encoding

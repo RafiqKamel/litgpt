@@ -46,8 +46,8 @@ from litgpt.utils import (
 from litgpt.new_utils import (
     update_positional_mlp_lr,
     mark_MLP_for_finetuning,
-    prepare_eigvecs_datapoint,
 )
+from litgpt.new_utils import create_indexing_map, starting_token_len, recreate_graph
 from litgpt.prompts import PromptStyle
 import numpy as np
 from unidecode import unidecode
@@ -85,7 +85,7 @@ def setup(
     eval: EvalArgs = EvalArgs(interval=100, max_new_tokens=100, max_iters=100),
     optimizer: Union[str, Dict] = "AdamW",
     logger_name: Literal["wandb", "tensorboard", "csv"] = "csv",
-    seed: int = 1337,
+    seed: int = 201,
     access_token: Optional[str] = None,
 ) -> None:
     """Finetune a model using the LoRA method.
@@ -115,6 +115,7 @@ def setup(
         seed: The random seed to use for reproducibility.
         access_token: Optional API token to access models with restrictions.
     """
+    print("auto download checkpoint")
     checkpoint_dir = auto_download_checkpoint(
         model_name=checkpoint_dir, access_token=access_token
     )
@@ -123,7 +124,6 @@ def setup(
     data = Alpaca() if data is None else data
     devices = parse_devices(devices)
     out_dir = init_out_dir(out_dir)
-
     check_valid_checkpoint_dir(checkpoint_dir)
     config = Config.from_file(
         checkpoint_dir / "model_config.yaml",
@@ -190,7 +190,6 @@ def setup(
 
     if torch.cuda.is_available() and devices > 1:
         check_nvlink_connectivity(fabric)
-
     fabric.launch(
         main,
         devices,
@@ -217,6 +216,7 @@ def main(
     eval: EvalArgs,
     optimizer: Union[str, Dict],
 ) -> None:
+    print("validating args")
     validate_args(train, eval)
     eval.direction = train.direction
     eval.number_of_eigenvecs = train.number_of_eigenvecs
@@ -241,7 +241,7 @@ def main(
     else:
         eig_vec_size = train.number_of_eigenvecs * 2
     with fabric.init_module(empty_init=(fabric.world_size > 1)):
-        model = GPT(config, eig_vec_size=eig_vec_size)
+        model = GPT(config, eig_vec_size=eig_vec_size) 
     mark_only_lora_as_trainable(model)
 
     model = fabric.setup_module(model)
@@ -355,10 +355,8 @@ def fit(
         ConcatDataset([train_dataloader.dataset, val_dataloader.dataset])
     )
     model.max_seq_length = min(longest_seq_length, train.max_seq_length or float("inf"))
-    fabric.print(
-        f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
-        f" {model.max_seq_length} and context length is {model.config.block_size}"
-    )
+    print( f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
+        f" {model.max_seq_length} and context length is {model.config.block_size}", flush=True)
 
     if eval.initial_validation:
         val_loss = validate(
@@ -409,15 +407,17 @@ def fit(
         if train_iterator.epoch >= train.epochs:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        eig_vecs = batch["eigvecs"]
         len_starting_token_ids = batch["len_starting_token_ids"]
+        graph_str = batch["graph_str"]
+        indexing_map = batch["indexing_map"]
 
         is_accumulating = iter_num % train.gradient_accumulation_iters(devices) != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
             logits = model(
                 idx=input_ids,
                 lm_head_chunk_size=128,
-                eig_vecs=eig_vecs,
+                graph_str=graph_str,
+                indexing_map=indexing_map,
                 len_starting_token_ids=len_starting_token_ids,
             )
             # shift the targets such that output n predicts token n+1
@@ -539,13 +539,14 @@ def validate(
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        eig_vecs = batch["eigvecs"]
         output = batch["output"][0]
+        graph_str = batch["graph_str"]
+        indexing_map = batch["indexing_map"]
         
         outputs.append(output)
         len_starting_token_ids = batch["len_starting_token_ids"]
         logits = model(
-            input_ids, eig_vecs=eig_vecs, len_starting_token_ids=len_starting_token_ids
+            input_ids, len_starting_token_ids=len_starting_token_ids, graph_str=graph_str, indexing_map=indexing_map
         )
         token_ids = torch.argmax(logits, dim=-1) 
         predicted_output = tokenizer.decode(token_ids.squeeze())
@@ -609,19 +610,14 @@ def generate_example(
     )
     prompt = prompt_style_object.apply(processed_instruction)
     encoded = tokenizer.encode(prompt, device=fabric.device)
-    eig_vec, len_starting_token_ids, starting_tokens = prepare_eigvecs_datapoint(
-        graph_str=graph_text,
-        tokenizer=tokenizer,
-        sentence=old_instruction,
-        max_seq_length=model.max_seq_length,
-        prompt_style=prompt_style_object,
-        num_of_eigenvecs=eval.number_of_eigenvecs,
+    len_starting_token_ids, starting_tokens = starting_token_len(
+       tokenizer=tokenizer, prompt_style=prompt_style_object
     )
-    eig_vec = torch.from_numpy(
-        np.reshape(eig_vec, (1, eig_vec.shape[0], eig_vec.shape[1]))
-    ).to(model.device)
-    model_dtype = model.positional_encoding_mlp.fc1.weight.dtype
-    eig_vec = eig_vec.to(dtype=model_dtype)
+    G = recreate_graph(edge_list_str=graph_text)
+    num_nodes = len(G.nodes)
+    indexing_map = create_indexing_map(
+        sentence=old_instruction, tokenizer=tokenizer, num_of_nodes=num_nodes
+    )
     len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
     # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
     #     raise ValueError(
@@ -632,7 +628,6 @@ def generate_example(
     model.eval()
 
     max_returned_tokens = len(encoded) + eval.max_new_tokens
-
     if max_returned_tokens < model.max_seq_length:
         with fabric.init_tensor():
             # do not set `max_seq_length=max_returned_token` because memory is not a concern here
@@ -643,8 +638,9 @@ def generate_example(
             max_returned_tokens=max_returned_tokens,
             temperature=0.8,
             eos_id=tokenizer.eos_id,
-            eig_vecs=eig_vec,
             len_starting_token_ids=len_starting_token_ids,
+            indexing_map=[indexing_map],
+            graph_str=[graph_text],
         )
         model.clear_kv_cache()
         model.train()

@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
 from unidecode import unidecode
-from litgpt.new_utils import prepare_eigvecs_datapoint
+from litgpt.new_utils import create_indexing_map, starting_token_len, recreate_graph
 
 
 class DataModule(LightningDataModule):
@@ -65,7 +65,7 @@ class SFTDataset(Dataset):
         direction: str,
         num_of_eigenvecs: int,
         max_seq_length: int = -1,
-        mask_prompt: bool = True,
+        mask_prompt: bool = False,
         ignore_index: int = -100,
         transform: Optional[Callable[[Any], Any]] = None,
     ) -> None:
@@ -101,26 +101,26 @@ class SFTDataset(Dataset):
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)    
-        old_instruction = unidecode(example["instruction"])    
+        untokenized_instruction = unidecode(example["instruction"])    
         processed_instruction = example["instruction"]
         if "%SPLIT%" in processed_instruction:
             processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
         processed_instruction = unidecode(processed_instruction)    
-        example["output"] = unidecode(example["output"])
+        output = unidecode(example["output"])
         prompt = self.prompt_style.apply(prompt=processed_instruction, **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         encoded_response = self.tokenizer.encode(
-            example["output"], bos=False, eos=True, max_length=self.max_seq_length
+            output, bos=False, eos=True, max_length=self.max_seq_length
         )
         encoded_prompt_and_response = torch.cat(
             (encoded_prompt, encoded_response)
         ).type(torch.int64)
-        if (
-            self.max_seq_length > 0
-        ):  # do not slice off last token when self.max_seq_length = -1
-            encoded_prompt_and_response = encoded_prompt_and_response[
-                : self.max_seq_length
-            ]
+        # if (
+        #     self.max_seq_length > 0
+        # ):  # do not slice off last token when self.max_seq_length = -1
+        #     encoded_prompt_and_response = encoded_prompt_and_response[
+        #         : self.max_seq_length
+        #     ]
 
         # The labels are the full prompt with response, but with the prompt masked out
         labels = encoded_prompt_and_response.clone()
@@ -134,23 +134,18 @@ class SFTDataset(Dataset):
         ) + len(encoded_response)
 
         if "eigvecs" in example:
-            eig_vecs, len_starting_token_ids, starting_token_ids = (
-                example["eigvecs"],
-                example["len_starting_token_ids"],
-                example["starting_token_ids"],
-            )
+           pass
         else:
-            eig_vecs, len_starting_token_ids, starting_token_ids = (
-                prepare_eigvecs_datapoint(
-                    tokenizer=self.tokenizer,
-                    graph_str=example["graph_str"],
-                    sentence=old_instruction,
-                    prompt_style=self.prompt_style,
-                    max_seq_length=self.max_seq_length,
-                    num_of_eigenvecs=self.num_of_eigenvecs,
-                )
+            G = recreate_graph(edge_list_str=example["graph_str"])
+            num_of_nodes = len(G.nodes)
+            indexing_map = create_indexing_map(
+                sentence=untokenized_instruction,
+                tokenizer=self.tokenizer,
+                num_of_nodes=num_of_nodes,
             )
-            example["eigvecs"] = eig_vecs
+            len_starting_token_ids, starting_token_ids = starting_token_len(
+                prompt_style=self.prompt_style, tokenizer=self.tokenizer
+            )
             example["len_starting_token_ids"] = len_starting_token_ids
             example["starting_token_ids"] = starting_token_ids
 
@@ -170,8 +165,10 @@ class SFTDataset(Dataset):
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
             },
-            "eigvecs": eig_vecs,
             "len_starting_token_ids": len_starting_token_ids,
+            "output": prompt+output,
+            "graph_str": example["graph_str"],
+            "indexing_map": indexing_map,
         }
 
 
@@ -200,17 +197,17 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels", "eigvecs", "len_starting_token_ids"):
+    for key in ("input_ids", "labels", "len_starting_token_ids", "output", "indexing_map", "graph_str"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
         batched[key] = torch.nn.utils.rnn.pad_sequence(
             [sample[key] for sample in samples],
             batch_first=True,
             padding_value=pad_value,
-        ) if key not in ["len_starting_token_ids", "eigvecs"] else [sample[key] for sample in samples]  
+        ) if key not in ["len_starting_token_ids", "graph_str", "output", "indexing_map"] else [sample[key] for sample in samples]  
         
         # Truncate if needed
-        if key not in  ["len_starting_token_ids", "eigvecs"]:
+        if key not in  ["len_starting_token_ids", "eigvecs", "output", "indexing_map", "graph_str"]:
             if max_seq_length > 0:
                 batched[key] = batched[key][:, :max_seq_length]
     batched["token_counts"] = {}
