@@ -100,11 +100,12 @@ class SFTDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Union[Tensor, Dict[str, int]]]:
         example = self.data[idx]
         if self.transform is not None:
-            example = self.transform(example)    
-        untokenized_instruction = unidecode(example["instruction"])    
-        processed_instruction = example["instruction"]
-        if "%SPLIT%" in processed_instruction:
-            processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
+            example = self.transform(example)      
+        instruction = unidecode(example["instruction"])
+        if "%SPLIT%" in instruction:
+            processed_instruction = instruction.replace("%SPLIT%", " ")  
+        else:
+            processed_instruction = instruction    
         processed_instruction = unidecode(processed_instruction)    
         output = unidecode(example["output"])
         prompt = self.prompt_style.apply(prompt=processed_instruction, **example)
@@ -139,7 +140,7 @@ class SFTDataset(Dataset):
             G = recreate_graph(edge_list_str=example["graph_str"])
             num_of_nodes = len(G.nodes)
             indexing_map = create_indexing_map(
-                sentence=untokenized_instruction,
+                sentence=instruction,
                 tokenizer=self.tokenizer,
                 num_of_nodes=num_of_nodes,
             )
