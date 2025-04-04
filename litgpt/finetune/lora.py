@@ -539,7 +539,7 @@ def validate(
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
-        output = batch["output"][0]
+        output = batch["output"][0] if len(batch["output"]) == 1 else "ERROR"
         graph_str = batch["graph_str"]
         indexing_map = batch["indexing_map"]
         
@@ -590,68 +590,75 @@ def validate(
 def generate_example(
     fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule
 ):
-
-    instruction, graph_text = select_sft_generate_example(eval=eval, data=data)
-    print("Instruction: ", instruction)
-    old_instruction = unidecode(instruction)    
-    processed_instruction = instruction
-    if "%SPLIT%" in processed_instruction:
-        processed_instruction = processed_instruction.replace("%SPLIT%", " ")  
-    processed_instruction = unidecode(processed_instruction)
-    old_instruction = unidecode(instruction)  
-    print("Processed Instruction: ", processed_instruction)
-    print("Old Instruction: ", old_instruction)
-    fabric.print(processed_instruction)
-    prompt_style = eval.direction
-    prompt_style_object = (
-        prompt_style
-        if isinstance(prompt_style, PromptStyle)
-        else PromptStyle.from_name(prompt_style)
-    )
-    prompt = prompt_style_object.apply(processed_instruction)
-    encoded = tokenizer.encode(prompt, device=fabric.device)
-    len_starting_token_ids, starting_tokens = starting_token_len(
-       tokenizer=tokenizer, prompt_style=prompt_style_object
-    )
-    G = recreate_graph(edge_list_str=graph_text)
-    num_nodes = len(G.nodes)
-    indexing_map = create_indexing_map(
-        sentence=old_instruction, tokenizer=tokenizer, num_of_nodes=num_nodes
-    )
-    len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
-    # if not torch.equal(encoded[:len_starting_token_ids], starting_tokens.to(fabric.device)):
-    #     raise ValueError(
-    #         "The starting tokens in the instruction do not match the starting tokens in the graph",
-    #         starting_tokens,
-    #         encoded[: len_starting_token_ids + 4],
-    #     )
+    k = 100
+    #shuffle dataset
+    dataset = data.test_dataset.data
+    np.random.shuffle(dataset)
+    # Select the first k examples
+    dataset= dataset[:k]
     model.eval()
-
-    max_returned_tokens = len(encoded) + eval.max_new_tokens
-    if max_returned_tokens < model.max_seq_length:
-        with fabric.init_tensor():
-            # do not set `max_seq_length=max_returned_token` because memory is not a concern here
-            model.set_kv_cache(batch_size=1)
-        output = generate(
-            model,
-            encoded,
-            max_returned_tokens=max_returned_tokens,
-            temperature=0.8,
-            eos_id=tokenizer.eos_id,
-            len_starting_token_ids=len_starting_token_ids,
-            indexing_map=[indexing_map],
-            graph_str=[graph_text],
+    gold_outputs = []
+    predicted_outputs = []
+    for d in dataset:
+        instruction = d["instruction"]
+        graph_text = d["graph_str"]
+        gold_output = d["output"]
+        gold_outputs.append(gold_output)
+        instruction = unidecode(instruction)
+        prompt_style = eval.direction
+        prompt_style_object = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
         )
-        model.clear_kv_cache()
-        model.train()
-        output = tokenizer.decode(output)
-        fabric.print(f"{output}\n")
-    else:
-        print(
-            f"Length of encoded instruction ({len(encoded)}) and eval.max_new_tokens ({eval.max_new_tokens}) "
-            f"exceeds model.max_seq_length ({model.max_seq_length}) used for training. Skipping example generation for efficiency. "
-            f"The model's supported context size (post-training) is {model.config.block_size}."
+        processed_instruction = instruction.replace("%SPLIT%", " ") if "%SPLIT%" in instruction else instruction
+        prompt = prompt_style_object.apply(processed_instruction)
+        encoded = tokenizer.encode(prompt, device=fabric.device)
+        len_starting_token_ids, _ = starting_token_len(
+            tokenizer=tokenizer, prompt_style=prompt_style_object
         )
+        G = recreate_graph(edge_list_str=graph_text)
+        num_nodes = len(G.nodes)
+        indexing_map = create_indexing_map(
+            sentence=instruction, tokenizer=tokenizer, num_of_nodes=num_nodes
+        )
+        len_starting_token_ids = torch.tensor([len_starting_token_ids]).to(model.device)
+        max_returned_tokens = len(encoded) + eval.max_new_tokens
+        if max_returned_tokens < model.max_seq_length:
+            with fabric.init_tensor():
+                # do not set `max_seq_length=max_returned_token` because memory is not a concern here
+                model.set_kv_cache(batch_size=1)
+            output = generate(
+                model,
+                encoded,
+                max_returned_tokens=max_returned_tokens,
+                temperature=0.8,
+                eos_id=tokenizer.eos_id,
+                len_starting_token_ids=len_starting_token_ids,
+                indexing_map=[indexing_map],
+                graph_str=[graph_text],
+            )
+            model.clear_kv_cache()
+            model.train()
+            output = tokenizer.decode(output)
+            fabric.print(f"{output}\n")
+            predicted_outputs.append(output)
+        else:
+            print(
+                f"Length of encoded instruction ({len(encoded)}) and eval.max_new_tokens ({eval.max_new_tokens}) "
+                f"exceeds model.max_seq_length ({model.max_seq_length}) used for training. Skipping example generation for efficiency. "
+                f"The model's supported context size (post-training) is {model.config.block_size}."
+            )
+    model.train()        
+    for i in range(len(predicted_outputs)):
+        if "[Output: Text]" in predicted_outputs[i] and len(predicted_outputs[i].split("[Output: Text]")) == 2:
+            predicted_outputs[i] = predicted_outputs[i].split("[Output: Text]")[1]
+        if "[Output: Text]" in gold_outputs[i] and len(gold_outputs[i].split("[Output: Text]")) == 2:
+            gold_outputs[i] = gold_outputs[i].split("[Output: Text]")[1]    
+    spring_bleu_cuts = spring_bleu_scoring(preds=predicted_outputs, gold=gold_outputs)
+    raw_corpus_bleu_score_cuts = raw_corpus_bleu(hypothesis=predicted_outputs, reference=gold_outputs)
+    print("Generate score: Spring BLEU Score: ", spring_bleu_cuts)
+    print("Generate score: Raw Corpus BLEU Score: ", raw_corpus_bleu_score_cuts)
 
 
 def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 0):
