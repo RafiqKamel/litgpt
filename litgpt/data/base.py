@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
+from litgpt.multilabel_utils import prepare_sequence_and_possibilities
 
 
 class DataModule(LightningDataModule):
@@ -78,9 +79,20 @@ class SFTDataset(Dataset):
         example = self.data[idx]
         if self.transform is not None:
             example = self.transform(example)
-        prompt = self.prompt_style.apply(prompt=example["instruction"], **example)
+        prompt_style = "text2amr"
+        self.prompt_style = (
+            prompt_style
+            if isinstance(prompt_style, PromptStyle)
+            else PromptStyle.from_name(prompt_style)
+        )   
+        prompt = self.prompt_style.apply(prompt=example["output"], **example)
+        print("prompt", prompt)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
-        encoded_response = self.tokenizer.encode(example["output"], bos=False, eos=True, max_length=self.max_seq_length)
+        try:
+            #encoded_response, possibilites = prepare_sequence_and_possibilities(amr_linearization=example["amr_linearization"], tokenizer=self.tokenizer, graph_structure=example["graph_structure"])
+            encoded_response = self.tokenizer.encode(" ".join(example["instruction"].split("%SPLIT%")), max_length=self.max_seq_length)
+        except Exception as e:
+            raise Exception(e.__traceback__, example)
         encoded_prompt_and_response = torch.cat((encoded_prompt, encoded_response)).type(torch.int64)
         if self.max_seq_length > 0:  # do not slice off last token when self.max_seq_length = -1
             encoded_prompt_and_response = encoded_prompt_and_response[: self.max_seq_length]
@@ -90,15 +102,16 @@ class SFTDataset(Dataset):
         if self.mask_prompt:
             labels[: len(encoded_prompt)] = self.ignore_index
 
-        raw_token_count = len(self.tokenizer.encode(example["instruction"], max_length=self.max_seq_length)) + len(encoded_response)
-
+        raw_token_count = len(self.tokenizer.encode(example["output"], max_length=self.max_seq_length)) + len(encoded_response)
+        
         return {
             "input_ids": encoded_prompt_and_response,
             "labels": labels,
             "token_counts": {
                 "raw": raw_token_count,
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
-            }
+            },
+            #"possibilities": possibilites
         }
 
 

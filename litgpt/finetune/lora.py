@@ -43,6 +43,7 @@ from litgpt.utils import (
     save_hyperparameters,
     select_sft_generate_example,
 )
+from litgpt.prompts import PromptStyle
 
 
 def setup(
@@ -417,7 +418,8 @@ def generate_example(fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: E
     instruction = select_sft_generate_example(eval, data)
 
     fabric.print(instruction)
-    prompt = data.prompt_style.apply(instruction)
+    prompt_style = PromptStyle.from_name("text2amr")
+    prompt = prompt_style.apply(instruction)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     model.eval()
 

@@ -316,7 +316,41 @@ class SmolLM2(ChatML):
 class Salamandra(ChatML):
     def __init__(self):
         super().__init__("I am Salamandra, an AI language model developed at the Barcelona Supercomputing Centre (BSC) by the Language Technologies Unit. My knowledge base was last updated on August 2023. Today Date: 2024-09-30\nSoy Salamandra, un modelo lingüístico de IA desarrollado en el Barcelona Supercomputing Centre (BSC) por la Language Technologies Unit. Mi base de conocimientos se actualizó por última vez en agosto de 2023.\nSoc Salamandra, un model de llenguatge d'IA desenvolupat al Barcelona Supercomputing Centre (BSC) per la Language Technologies Unit.")
+class AMR2Text(PromptStyle):
+    def name(self) -> str:
+        return "amr2text"
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"{self.starting_token()}{prompt}{self.ending_token()}"
+    def starting_token(self) -> str:
+        # Starting token includes task, instructions, and the AMR
+        return (
+            f"<AMR-to-Text>\n"
+            f"[Task: AMR-to-Text]\n"
+            f"[Instruction] Convert the following Abstract Meaning Representation graph into its corresponding natural language text. Pay attention to details and take it step by step\n"
+            f"[Input: AMR]\n"
+        )
 
+    def ending_token(self) -> str:
+        # End token indicating completion of the task
+        return "\n[Output: Text]\n"
+
+class Text2AMR(PromptStyle):
+    def name(self) -> str:
+        return "text2amr"
+    def apply(self, prompt: str, **kwargs: str) -> str:
+        return f"{self.starting_token()}{prompt}{self.ending_token()}"
+    def starting_token(self) -> str:
+        # Starting token includes task, instructions, and the AMR
+        return (
+            f"<Text-to-AMR>\n"
+            f"[Task: AMR-to-Text]\n"
+            f"[Instruction] Parse the following natural language text into Abstract Meaning Represntation.\n"
+            f"[Input: Text]\n"
+        )
+
+    def ending_token(self) -> str:
+        # End token indicating completion of the task
+        return "\n[Output: AMR]\n"
 
 # Maps prompt style names to PromptStyle classes
 prompt_styles: Dict[str, Type[PromptStyle]] = {
@@ -346,6 +380,7 @@ prompt_styles: Dict[str, Type[PromptStyle]] = {
     "qwq": QwQ,
     "smollm2": SmolLM2,
     "salamandra": Salamandra,
+    "text2amr": Text2AMR,
 }
 
 
