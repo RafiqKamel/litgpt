@@ -462,6 +462,44 @@ class LLM(torch.nn.Module):
     
 
     @torch.inference_mode()
+    def alternative_generate(
+        self,
+        prompt: str,
+        graph_str: Optional[str] = None,
+    ):       
+        self.model.eval() 
+        prompt = unidecode(prompt) 
+        input_ids = self._text_to_token_ids(prompt) #make sure you parse this into batch
+        input_ids = input_ids.cpu().numpy() if isinstance(input_ids, torch.Tensor) else input_ids
+        input_ids = torch.from_numpy(
+        np.reshape(input_ids, (1, input_ids.shape[0]))
+        ).to(self.model.device)
+        len_starting_tokens, _ = starting_token_len(
+                    tokenizer=self.preprocessor.tokenizer, prompt_style=self.prompt_style
+         )
+        len_starting_tokens = torch.tensor([len_starting_tokens]).to(self.model.device)
+        G = recreate_graph(edge_list_str=graph_str)
+        num_nodes = len(G.nodes)
+        indexing_map = create_indexing_map(
+        sentence=prompt, tokenizer=self.preprocessor.tokenizer, num_of_nodes=num_nodes
+    )
+        indexing_map = [indexing_map]
+        graph_str = [graph_str]
+        print("input_ids: ", input_ids.shape)
+        logits = self.model(
+            input_ids, len_starting_token_ids=len_starting_tokens, graph_str=graph_str, indexing_map=indexing_map
+        )
+        print("logits: ", logits.shape)
+        token_ids = torch.argmax(logits, dim=-1) 
+        predicted_output = self.preprocessor.tokenizer.decode(token_ids.squeeze())
+        if "[Output: Text]" in predicted_output and len(predicted_output.split("[Output: Text]")) == 2:
+            predicted_output_cut = predicted_output.split("[Output: Text]")[1]
+            return predicted_output_cut
+        else:
+            print("The output is not in the expected format.")
+            return predicted_output  
+    
+    @torch.inference_mode()
     def generate(
         self,
         prompt: str,
@@ -507,8 +545,13 @@ class LLM(torch.nn.Module):
                 "The model is not initialized yet; use the .distribute() "
                 "or .trainer_setup() method to initialize the model."
             )
-        input_ids = self._text_to_token_ids(prompt) #make sure you parse this into batch
-        prompt = unidecode(prompt)   
+        prompt = unidecode(prompt)       
+        if "%SPLIT%" in prompt:
+            preprocessed_prompt = prompt.replace("%SPLIT%", " ")
+        else:
+            preprocessed_prompt = prompt    
+        prompt = unidecode(prompt)
+        input_ids = self._text_to_token_ids(preprocessed_prompt) #make sure you parse this into batch
         #input_ids = input_ids.cpu().numpy() if isinstance(input_ids, torch.Tensor) else input_ids
         # input_ids = torch.from_numpy(
         # np.reshape(input_ids, (1, input_ids.shape[0]))
@@ -521,7 +564,7 @@ class LLM(torch.nn.Module):
         num_nodes = len(G.nodes)
         indexing_map = create_indexing_map(
         sentence=prompt, tokenizer=self.preprocessor.tokenizer, num_of_nodes=num_nodes
-    )
+        )
         indexing_map = [indexing_map]
         graph_str = [graph_str]
         prompt_length = input_ids.size(0)
@@ -596,9 +639,6 @@ class LLM(torch.nn.Module):
 
     def _text_to_token_ids(self, prompt):
         """Utility method to convert a prompt text to token IDs"""
-        if "%SPLIT%" in prompt:
-            prompt = prompt.replace("%SPLIT%", " ")
-        prompt = unidecode(prompt)
         prompt = self.prompt_style.apply(prompt)
         print("processed prompt: ", prompt)
         input_ids = self.preprocessor.encode(prompt)
