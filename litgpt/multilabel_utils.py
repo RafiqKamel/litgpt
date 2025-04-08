@@ -298,9 +298,7 @@ def return_all_possibilities_for_sequence(
         ]
         if sequence[i][2]:
             seen_pointers.add(sequence[i][0])
-            print("Pointer detected", seen_pointers, possibilities[1])
             possibilities[1] = list(set(possibilities[1]) & seen_pointers)
-            print("After filtering", possibilities[1])
         if stop_token in possibilities[1]:
             possibilities[1].remove(stop_token)
         possibilities = list(set([possibilities[0]] + possibilities[1]))
@@ -312,9 +310,10 @@ def return_all_possibilities_for_sequence(
 
 def encode_amr_sequence_and_possibilities(sequence, possibilities, tokenizer):
     encoded_sequence = [encode_without_special_chars(tokenizer, x[0]) for x in sequence]
-    for tok in encoded_sequence:
-        if len(tok) != 1:
-            raise ValueError("Tokenization error")
+    for i in range(len(encoded_sequence)):
+        if len(encoded_sequence[i]) != 1:
+            raise ValueError("Tokenization error", f"Token: {encoded_sequence[i]}")
+        encoded_sequence[i] = encoded_sequence[i][0]
     encoded_possibilities = [
         [
             encode_without_special_chars(tokenizer=tokenizer, target=x)[0]
@@ -346,7 +345,6 @@ def prepare_sequence_and_possibilities(amr_linearization, graph_structure, token
         [expanded_graph.nodes[root]["value"] for root in roots],
         node_mapping,
     )
-    encode_amr_sequence_and_possibilities(sequence_updated, all_possibilites, tokenizer)
     return sequence_updated, all_possibilites
 
 
@@ -618,10 +616,6 @@ def score_amr_pairs(
         total_gold_num += gold_triple_num
         # clear the matching triple dictionary for the next AMR pair
         smatch.match_triple_dict.clear()
-        if (
-            not single_score
-        ):  # if each AMR pair should have a score, compute and output it here
-            yield compute_f(best_match_num, test_triple_num, gold_triple_num)
     if (
         single_score
     ):  # output document-level smatch score (a single f-score for all AMR pairs in two files)
