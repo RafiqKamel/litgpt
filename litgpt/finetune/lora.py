@@ -429,7 +429,6 @@ def fit(
         for i, param_group in enumerate(optimizer.param_groups):
             example_param = param_group['params'][0]
             name = param_to_name.get(example_param, "Unknown")
-            print(f"Parameter group {i} containing {name}: Learning rate = {param_group['lr']:.2e}")
         running_loss.update(loss.detach())
 
         if not is_accumulating:
@@ -540,6 +539,8 @@ def validate(
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
         output = batch["output"][0] if len(batch["output"]) == 1 else "ERROR"
+        if output == "ERROR":
+            raise ValueError("Output is empty")
         graph_str = batch["graph_str"]
         indexing_map = batch["indexing_map"]
         
@@ -633,7 +634,7 @@ def generate_example(
                 encoded,
                 max_returned_tokens=max_returned_tokens,
                 temperature=0.0,
-                top_k=0,
+                top_k=1,
                 eos_id=tokenizer.eos_id,
                 len_starting_token_ids=len_starting_token_ids,
                 indexing_map=[indexing_map],
@@ -642,7 +643,6 @@ def generate_example(
             model.clear_kv_cache()
             model.train()
             output = tokenizer.decode(output)
-            fabric.print(f"{output}\n")
             predicted_outputs.append(output)
         else:
             print(
