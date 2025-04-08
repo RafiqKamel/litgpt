@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
-from litgpt.multilabel_utils import prepare_sequence_and_possibilities
+from litgpt.multilabel_utils import prepare_sequence_and_possibilities, encode_amr_sequence_and_possibilities
 
 
 class DataModule(LightningDataModule):
@@ -85,15 +85,17 @@ class SFTDataset(Dataset):
             if isinstance(prompt_style, PromptStyle)
             else PromptStyle.from_name(prompt_style)
         )   
-        prompt = self.prompt_style.apply(prompt=example["output"], **example)
-        print("prompt", prompt)
+        prompt = self.prompt_style.apply(prompt=example["sentence"], **example)
         encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
         try:
-            #encoded_response, possibilites = prepare_sequence_and_possibilities(amr_linearization=example["amr_linearization"], tokenizer=self.tokenizer, graph_structure=example["graph_structure"])
-            encoded_response = self.tokenizer.encode(" ".join(example["instruction"].split("%SPLIT%")), max_length=self.max_seq_length)
+            amr_random_sequence, possibilites = prepare_sequence_and_possibilities(amr_linearization=example["amr_linearization"], tokenizer=self.tokenizer, graph_structure=example["graph_structure"])
+            encoded_sequence, encoded_possibilies = encode_amr_sequence_and_possibilities(sequence=amr_random_sequence, tokenizer=self.tokenizer, possibilities=possibilites)
+            amr_random_sequence = "".join([x[0] for x in amr_random_sequence])
+            #encoded_response = self.tokenizer.encode(" ".join(example["sentence"].split("%SPLIT%")), max_length=self.max_seq_length)
         except Exception as e:
-            raise Exception(e.__traceback__, example)
-        encoded_prompt_and_response = torch.cat((encoded_prompt, encoded_response)).type(torch.int64)
+            raise Exception(e, example)
+        
+        encoded_prompt_and_response = torch.cat((encoded_prompt, encoded_sequence)).type(torch.int64)
         if self.max_seq_length > 0:  # do not slice off last token when self.max_seq_length = -1
             encoded_prompt_and_response = encoded_prompt_and_response[: self.max_seq_length]
 
@@ -102,7 +104,7 @@ class SFTDataset(Dataset):
         if self.mask_prompt:
             labels[: len(encoded_prompt)] = self.ignore_index
 
-        raw_token_count = len(self.tokenizer.encode(example["output"], max_length=self.max_seq_length)) + len(encoded_response)
+        raw_token_count = len(self.tokenizer.encode(example["sentence"], max_length=self.max_seq_length)) + len(encoded_sequence)
         
         return {
             "input_ids": encoded_prompt_and_response,
@@ -112,6 +114,8 @@ class SFTDataset(Dataset):
                 "raw_plus_prompt_template": len(encoded_prompt_and_response),
             },
             #"possibilities": possibilites
+            "amr_linearization": amr_random_sequence,
+            "sentence": example["sentence"],
         }
 
 
@@ -130,17 +134,22 @@ def _sft_collate_fn(
 ) -> Dict[str, Tensor]:
 
     batched = {}
-    for key in ("input_ids", "labels"):
+    for key in ("input_ids", "labels", "amr_linearization"):
         pad_value = pad_id if key == "input_ids" else ignore_index
 
         # Pad right based on the longest sequence
         batched[key] = torch.nn.utils.rnn.pad_sequence(
             [sample[key] for sample in samples], batch_first=True, padding_value=pad_value
-        )
+        ) if key not in ["amr_linearization", "sentence"] else [sample[key] for sample in samples]
 
-        # Truncate if needed
-        if max_seq_length > 0:
-            batched[key] = batched[key][:, :max_seq_length]
+        
+        if key not in ["amr_linearization", "sentence"]:
+            # Truncate if needed
+            if max_seq_length > 0:
+                try:
+                    batched[key] = batched[key][:, :max_seq_length]
+                except Exception as e:
+                    raise Exception(e, f"max seq len is ({max_seq_length})" , batched[key], key)    
 
     batched["token_counts"] = {}
     batched["token_counts"]["raw"] = torch.tensor(  # Token count without padding and without prompt template
