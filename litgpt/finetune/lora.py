@@ -44,7 +44,12 @@ from litgpt.utils import (
     select_sft_generate_example,
 )
 from litgpt.prompts import PromptStyle
-
+from litgpt.multilabel_utils import (
+    delinearize_into_triples,
+    triples_to_smatch_AMR,
+    score_amr_pairs
+)
+import numpy as np
 
 def setup(
     checkpoint_dir: Path,
@@ -245,7 +250,7 @@ def main(
 
     # Final evaluation
     if eval.final_validation:
-        val_loss = validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=len(val_dataloader)))
+        val_loss = validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=len(val_dataloader)), tokenizer=tokenizer)
         metrics = {"val_loss": val_loss, "val_ppl": math.exp(val_loss)}
         fabric.log_dict(metrics)
         fabric.print(f"Final evaluation | val loss: {val_loss.item():.3f} | val ppl: {math.exp(val_loss):.3f}")
@@ -285,11 +290,11 @@ def fit(
     )
 
     if eval.initial_validation:
-        val_loss = validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=len(val_dataloader)))
+        val_loss = validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=len(val_dataloader)), tokenizer=tokenizer)
         val_loss = f"{val_loss:.3f}"
     else:
         fabric.print("Verifying settings ...")
-        validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=2), verbose=False)  # sanity check
+        validate(fabric, model, val_dataloader, dataclasses.replace(eval, max_iters=2), verbose=False, tokenizer=tokenizer)  # sanity check
         val_loss = "n/a"
 
     train_iterator = CycleIterator(train_dataloader)
@@ -368,7 +373,7 @@ def fit(
 
         if not is_accumulating and step_count % eval.interval == 0:
             t0 = time.perf_counter()
-            val_loss = validate(fabric, model, val_dataloader, eval)
+            val_loss = validate(fabric, model, val_dataloader, eval, tokenizer=tokenizer)
             generate_example(fabric, model, tokenizer, eval, data)
             t1 = time.perf_counter() - t0
             fabric.print(f"iter {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f} ms")
@@ -395,17 +400,43 @@ def fit(
 
 # FSDP has issues with `inference_mode`
 @torch.no_grad()
-def validate(fabric: L.Fabric, model: GPT, val_dataloader: DataLoader, eval: EvalArgs, verbose: bool = True) -> torch.Tensor:
+def validate(fabric: L.Fabric, model: GPT, val_dataloader: DataLoader, eval: EvalArgs, verbose: bool = True, tokenizer = None) -> torch.Tensor:
     if verbose:
         fabric.print("Validating ...")
     model.eval()
     losses = torch.zeros(min(len(val_dataloader), eval.max_iters))
+    gold_outputs_amr = []
+    predicted_outputs_amr = []
+    invalid_predictions_count = 0
     for k, batch in enumerate(val_dataloader):
         if k >= eval.max_iters:
             break
         input_ids, targets = batch["input_ids"], batch["labels"]
+        gold_output = batch["amr_linearization"][0] if len(batch["amr_linearization"]) ==1 else None
+        if gold_output is None:
+            raise ValueError("Gold output is None because batch size is more than 1. Please set batch size to 1.")
         logits = model(input_ids)
         losses[k] = chunked_cross_entropy(logits[..., :-1, :], targets[..., 1:], chunk_size=0)
+        token_ids = torch.argmax(logits, dim=-1) 
+        predicted_output = tokenizer.decode(token_ids.squeeze())
+        try:
+            predicted_output_amr_triples = delinearize_into_triples(predicted_output)
+            predicted_output_amr = triples_to_smatch_AMR(predicted_output_amr_triples)
+            predicted_outputs_amr.append(predicted_output_amr)
+        except Exception as e:
+            fabric.print(f"Error in delinearizing predicted output: {e} for output: {predicted_output}")
+            invalid_predictions_count += 1
+            continue
+        try: 
+            gold_output_amr_triples = delinearize_into_triples(gold_output)
+            gold_output_amr = triples_to_smatch_AMR(gold_output_amr_triples)
+            gold_outputs_amr.append(gold_output_amr)
+        except Exception as e:
+            raise ValueError(f"Error in delinearizing gold output: {e} for output: {gold_output}")   
+    smatch_score = score_amr_pairs(predicted_outputs_amr, gold_outputs_amr)
+    fabric.print(f"SMATCH score: {smatch_score}")
+    fabric.print(f"Invalid predictions count: {invalid_predictions_count}")
+        
 
     val_loss = losses.mean()
 
@@ -415,33 +446,60 @@ def validate(fabric: L.Fabric, model: GPT, val_dataloader: DataLoader, eval: Eva
 
 @torch.no_grad()
 def generate_example(fabric: L.Fabric, model: GPT, tokenizer: Tokenizer, eval: EvalArgs, data: DataModule):
-    instruction = select_sft_generate_example(eval, data)
-
-    fabric.print(instruction)
-    prompt_style = PromptStyle.from_name("text2amr")
-    prompt = prompt_style.apply(instruction)
-    encoded = tokenizer.encode(prompt, device=fabric.device)
+    k = 100
+    #shuffle dataset
+    dataset = data.test_dataset.data
+    np.random.shuffle(dataset)
+    # Select the first k examples
+    dataset= dataset[:k]
     model.eval()
-
-    max_returned_tokens = len(encoded) + eval.max_new_tokens
-
-    if max_returned_tokens < model.max_seq_length:
-        with fabric.init_tensor():
-            # do not set `max_seq_length=max_returned_token` because memory is not a concern here
-            model.set_kv_cache(batch_size=1)
-        output = generate(
-            model, encoded, max_returned_tokens=max_returned_tokens, temperature=0.8, eos_id=tokenizer.eos_id
+    gold_outputs = []
+    predicted_outputs = []
+    invalid_predictions_count = 0
+    model.eval()
+    for d in dataset:
+        instruction = d["sentence"]
+        fabric.print(instruction)
+        prompt_style = PromptStyle.from_name("text2amr")
+        prompt = prompt_style.apply(instruction)
+        encoded = tokenizer.encode(prompt, device=fabric.device)
+        max_returned_tokens = len(encoded) + eval.max_new_tokens
+        if max_returned_tokens < model.max_seq_length:
+            with fabric.init_tensor():
+                # do not set `max_seq_length=max_returned_token` because memory is not a concern here
+                model.set_kv_cache(batch_size=1)
+            output = generate(
+                model, encoded, max_returned_tokens=max_returned_tokens, temperature=0.3, eos_id=tokenizer.eos_id
+            )
+            model.clear_kv_cache()
+            model.train()
+            output = tokenizer.decode(output)
+            predicted_outputs.append(output)
+            gold_output = d["amr_linearization"]
+            try:
+                amr_output = output.split("[Output: AMR]")[-1]
+                predicted_output_amr_triples = delinearize_into_triples(amr_output)
+                predicted_output_amr = triples_to_smatch_AMR(predicted_output_amr_triples)
+                predicted_outputs.append(predicted_output_amr)
+            except Exception as e:
+                fabric.print(f"Error in delinearizing predicted output: {e} for output: {output}")
+                invalid_predictions_count += 1
+                continue
+            try: 
+                gold_output_amr_triples = delinearize_into_triples(gold_output)
+                gold_output_amr = triples_to_smatch_AMR(gold_output_amr_triples)
+                gold_outputs.append(gold_output_amr)
+            except Exception as e:
+                raise ValueError(f"Error in delinearizing gold output: {e} for output: {gold_output}")
+        else:
+            print(
+                f"Length of encoded instruction ({len(encoded)}) and eval.max_new_tokens ({eval.max_new_tokens}) "
+                f"exceeds model.max_seq_length ({model.max_seq_length}) used for training. Skipping example generation for efficiency. "
+                f"The model's supported context size (post-training) is {model.config.block_size}."
         )
-        model.clear_kv_cache()
-        model.train()
-        output = tokenizer.decode(output)
-        fabric.print(f"{output}\n")
-    else:
-        print(
-            f"Length of encoded instruction ({len(encoded)}) and eval.max_new_tokens ({eval.max_new_tokens}) "
-            f"exceeds model.max_seq_length ({model.max_seq_length}) used for training. Skipping example generation for efficiency. "
-            f"The model's supported context size (post-training) is {model.config.block_size}."
-        )
+    smatch = score_amr_pairs(predicted_outputs, gold_outputs)
+    fabric.print(f"Generation: SMATCH score: {smatch:.4f}")
+    fabric.print(f"Generation: Invalid predictions count: {invalid_predictions_count}")        
 
 
 def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int):
