@@ -46,6 +46,7 @@ from litgpt.utils import (
 from litgpt.new_utils import (
     update_positional_mlp_lr,
     mark_MLP_for_finetuning,
+    nodewise_tokenize
 )
 from litgpt.new_utils import create_indexing_map, starting_token_len, recreate_graph
 from litgpt.prompts import PromptStyle
@@ -119,7 +120,6 @@ def setup(
     checkpoint_dir = auto_download_checkpoint(
         model_name=checkpoint_dir, access_token=access_token
     )
-    #precision = "32-true"
     pprint(locals())
     data = Alpaca() if data is None else data
     devices = parse_devices(devices)
@@ -139,6 +139,7 @@ def setup(
     )
 
     precision = precision or get_default_supported_precision(training=True)
+    print(f"Using precision: {precision}")
     logger = choose_logger(
         logger_name,
         out_dir,
@@ -485,7 +486,7 @@ def fit(
         if not is_accumulating and step_count % eval.interval == 0:
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_dataloader, eval, tokenizer=tokenizer)
-            generate_example(fabric, model, tokenizer, eval, data)
+            #generate_example(fabric, model, tokenizer, eval, data)
             t1 = time.perf_counter() - t0
             fabric.print(
                 f"iter {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f} ms"
@@ -506,6 +507,10 @@ def fit(
                 copy_config_files(checkpoint_dir, checkpoint_file.parent)
                 save_hyperparameters(setup, checkpoint_file.parent)
                 save_prompt_style(data.prompt_style, checkpoint_file.parent)
+                torch.save(
+                    model.positional_encoding_mlp.state_dict(),
+                    checkpoint_file.parent / "pos_encoding_weights.pth",
+                )
 
     total_token_counts = {}
     for key in token_counts:
@@ -549,12 +554,16 @@ def validate(
         logits = model(
             input_ids, len_starting_token_ids=len_starting_token_ids, graph_str=graph_str, indexing_map=indexing_map
         )
-        token_ids = torch.argmax(logits, dim=-1) 
-        predicted_output = tokenizer.decode(token_ids.squeeze())
+        token_ids = torch.argmax(logits.squeeze(), dim=-1) 
+        predicted_output = tokenizer.decode(token_ids)
         if "[Output: Text]" in predicted_output and len(predicted_output.split("[Output: Text]")) == 2:
             predicted_output_cut = predicted_output.split("[Output: Text]")[1]
-            predicted_outputs_cut.append(predicted_output_cut)
             output_cut = output.split("[Output: Text]")[1]
+            if predicted_output_cut.startswith("\n"):
+                predicted_output_cut = predicted_output_cut[1:]
+            if output_cut.startswith("\n"):
+                output_cut = output_cut[1:]
+            predicted_outputs_cut.append(predicted_output_cut)    
             outputs_cut.append(output_cut)        
         else:
             non_valid_number += 1       
@@ -600,6 +609,7 @@ def generate_example(
     model.eval()
     gold_outputs = []
     predicted_outputs = []
+    predicted_outputs2 = []
     for d in dataset:
         instruction = d["instruction"]
         graph_text = d["graph_str"]
@@ -613,8 +623,11 @@ def generate_example(
             else PromptStyle.from_name(prompt_style)
         )
         processed_instruction = instruction.replace("%SPLIT%", " ") if "%SPLIT%" in instruction else instruction
-        prompt = prompt_style_object.apply(processed_instruction)
-        encoded = tokenizer.encode(prompt, device=fabric.device)
+        encoded = nodewise_tokenize(
+            prompt=instruction,
+            tokenizer=tokenizer,
+            prompt_style=prompt_style_object,
+        )
         len_starting_token_ids, _ = starting_token_len(
             tokenizer=tokenizer, prompt_style=prompt_style_object
         )
@@ -640,10 +653,21 @@ def generate_example(
                 indexing_map=[indexing_map],
                 graph_str=[graph_text],
             )
+            output2 = generate(
+                model,
+                encoded,
+                max_returned_tokens=max_returned_tokens,
+                eos_id=tokenizer.eos_id,
+                len_starting_token_ids=len_starting_token_ids,
+                indexing_map=[indexing_map],
+                graph_str=[graph_text],
+            )
             model.clear_kv_cache()
             model.train()
             output = tokenizer.decode(output)
             predicted_outputs.append(output)
+            output2 = tokenizer.decode(output2)
+            predicted_outputs2.append(output2)
         else:
             print(
                 f"Length of encoded instruction ({len(encoded)}) and eval.max_new_tokens ({eval.max_new_tokens}) "
@@ -656,10 +680,16 @@ def generate_example(
             predicted_outputs[i] = predicted_outputs[i].split("[Output: Text]")[1]
         if "[Output: Text]" in gold_outputs[i] and len(gold_outputs[i].split("[Output: Text]")) == 2:
             gold_outputs[i] = gold_outputs[i].split("[Output: Text]")[1]    
+        if "[Output: Text]" in predicted_outputs2[i] and len(predicted_outputs2[i].split("[Output: Text]")) == 2:
+            predicted_outputs2[i] = predicted_outputs2[i].split("[Output: Text]")[1]
     spring_bleu_cuts = spring_bleu_scoring(preds=predicted_outputs, gold=gold_outputs)
     raw_corpus_bleu_score_cuts = raw_corpus_bleu(hypothesis=predicted_outputs, reference=gold_outputs)
     print("Generate score: Spring BLEU Score: ", spring_bleu_cuts)
     print("Generate score: Raw Corpus BLEU Score: ", raw_corpus_bleu_score_cuts)
+    spring_bleu_cuts2 = spring_bleu_scoring(preds=predicted_outputs2, gold=gold_outputs)
+    raw_corpus_bleu_score_cuts2 = raw_corpus_bleu(hypothesis=predicted_outputs2, reference=gold_outputs)
+    print("Generate score2: Spring BLEU Score: ", spring_bleu_cuts2)
+    print("Generate score2: Raw Corpus BLEU Score: ", raw_corpus_bleu_score_cuts2)
 
 
 def get_lr_scheduler(optimizer, warmup_steps: int, max_steps: int, eta_min: float = 0):
