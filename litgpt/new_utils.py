@@ -98,7 +98,8 @@ def split_preserve_quotes(s):
     return re.findall(r'\".*?\"|\S+', s)
 
 def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
-    if num_of_nodes == len(tokenizer.encode(sentence)):
+    ids = nodewise_tokenize(sentence, tokenizer)
+    if num_of_nodes == len(ids):
         print("No need to process eigenvectors", flush=True)
         return {i: [i] for i in range(num_of_nodes)}
     if "%SPLIT%" in sentence:
@@ -111,7 +112,6 @@ def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
         print(num_of_nodes)
         raise ValueError(f"Number of nodes mismatch: {len(tokens)} != {num_of_nodes}")
         
-    ids = tokenizer.encode(sentence)
     subtokens = [tokenizer.decode(id) for id in ids]
 
     index_map = {}
@@ -122,29 +122,27 @@ def create_indexing_map(sentence: str, tokenizer, num_of_nodes):
         token_length = 0
         current_subtoken = ""
         internal_subtoken_index = 0
-
-        while token_length < len(strip_string(token)):
+        token = token + " "
+        while len(current_subtoken) < len(token):
             subtokens_for_token.append(internal_subtoken_index)
             internal_subtoken_index += 1
-            token_length += len(strip_string(subtokens[subtoken_index]))
+            token_length += len(subtokens[subtoken_index])
             current_subtoken += subtokens[subtoken_index]
             subtoken_index += 1
-        if strip_string(token) != strip_string(current_subtoken):
-            raise ValueError(f"Tokenization mismatch: {token} != {current_subtoken}")
+        if token != current_subtoken:
+            raise ValueError(f"Tokenization mismatch: ({token}) != ({current_subtoken})")
         index_map[i] = subtokens_for_token
 
     return index_map
 
 
-def strip_string(string):
-    string = unicodedata.normalize("NFC", string)
-    return string.replace(" ", "")
-
 
 
 def process_eigenvectors_subtokens( eigvecs, num_of_nodes, indexing_map):
     if len(eigvecs) != num_of_nodes:
-        print("Number of nodes mismatch", eigvecs.shape, num_of_nodes, flush=True)
+        raise ValueError(
+            f"Number of eigenvectors ({len(eigvecs)}) does not match number of nodes ({num_of_nodes})"
+        )
     subtoken_eigvecs = []
     global_subtoken_index = 0
     for i, eigvec in enumerate(eigvecs):
@@ -212,3 +210,41 @@ def mark_MLP_for_finetuning(model, target_module_name="positional_encoding_mlp")
         if target_module_name in name:
             print(f"Marking {name} for finetuning")
             param.requires_grad = True
+
+
+def nodewise_tokenize(prompt,  tokenizer,prompt_style=None, split_token="%SPLIT%"):
+    """
+    Tokenize the prompt using the provided tokenizer and prompt style.
+
+    Args:
+        prompt (str): The input prompt to tokenize.
+        prompt_style: The style of the prompt (e.g., "graph", "text").
+        tokenizer: The tokenizer to use for tokenization.
+
+    Returns:
+        list: A list of tokenized inputs.
+    """
+    nodes = prompt.split(split_token)
+    encoded_prompt = []
+    for node in nodes:
+        # Tokenize each node and add to the encoded prompt
+        tokenized_node = tokenizer.encode(node + " ")
+        encoded_prompt.extend(tokenized_node)
+    encoded_prompt = torch.tensor(encoded_prompt)    
+    if prompt_style is None:
+        return encoded_prompt
+    encoded_starting_token = tokenizer.encode(
+        prompt_style.starting_token()
+    )
+    encoded_ending_token = tokenizer.encode(
+        prompt_style.ending_token()
+    )
+    encoded_prompt = torch.cat(
+        (
+            encoded_starting_token,
+            encoded_prompt,
+            encoded_ending_token,
+        )
+    )
+    return encoded_prompt
+    
