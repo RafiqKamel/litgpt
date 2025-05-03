@@ -609,6 +609,14 @@ class GPT(BaseModel):
         add = add_positional_encodings
         
         # shifting the pos_encodings to the right to account for the added <AMR> token
+        if len(graph_str) != x.shape[0]:
+            raise ValueError(
+                f"Graph string length {len(graph_str)} does not match batch size {x.shape[0]}"
+            )
+        if len(indexing_map) != x.shape[0]:
+            raise ValueError(
+                f"Indexing map length {len(indexing_map)} does not match batch size {x.shape[0]}"
+            )   
         if add:
             for i in range(x.shape[0]):  # Iterate over each batch
                 single_eig_vecs = prepare_eigvecs_datapoint(
