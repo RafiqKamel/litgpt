@@ -21,7 +21,7 @@ def magnetic_laplacian(G, q):
         return np.exp(2 * np.pi * q * 1j * (A - A.T))
 
     nodelist = sorted(G.nodes())
-    A_directed = nx.to_pandas_adjacency(G, nodelist=nodelist).to_numpy()
+    A_directed = nx.to_pandas_adjacency(G, nodelist=nodelist).to_numpy(dtype=np.float64)
     A_symmetric = A_directed + A_directed.T
     assert np.allclose(A_symmetric, A_symmetric.T)
     D_s = np.diag(np.sum(A_symmetric, axis=1))
@@ -32,16 +32,25 @@ def magnetic_laplacian(G, q):
 
 
 def magL_eigenvectors(MagL):
+    MagL = MagL.astype(np.complex128)  # Safer for H100
     _, eig_vecs = np.linalg.eigh(MagL)
     return eig_vecs
 
+def stabilize_eigenvectors(vec):
+    for i in range(vec.shape[1]):
+        v = vec[:, i]
+        idx = np.argmax(np.abs(v))
+        if v[idx].real < 0:
+            vec[:, i] *= -1
+    return vec
 
 def magnetic_laplacian_eigenvectors(g, max_seq_len, num_of_eigenvecs,q=magentic_laplace_encodings_q):
     MagL = magnetic_laplacian(G=g, q=q)
     vec = magL_eigenvectors(MagL)
+    vec = stabilize_eigenvectors(vec) 
     if num_of_eigenvecs > 0 and num_of_eigenvecs < vec.shape[1]:
         vec = vec[:, :num_of_eigenvecs]
-    vec = pad_and_concat_eigenvectors(vec, max_seq_len = max_seq_len if num_of_eigenvecs == -1 else num_of_eigenvecs) 
+    vec = pad_and_concat_eigenvectors(vec, max_seq_len = max_seq_len if num_of_eigenvecs == -1 else num_of_eigenvecs)
     return vec
 
 
