@@ -90,8 +90,8 @@ def next_token(
     logits = model(
         idx=x,
         input_pos=input_pos,
-        graph_str=graph_str,
-        indexing_map=indexing_map,
+        graph_str=[graph_str],
+        indexing_map=[indexing_map],
         len_starting_token_ids=len_starting_token,
     )
     _next = sample(logits, **kwargs)
@@ -206,20 +206,20 @@ def generate_fn(
     for current_idx in range(max_returned_tokens - prompt_size):
 
         # Generate the token
-        new_token = next_token(
+        token = next_token(
             model= model,
             graph_str=graph_str,
             indexing_map=indexing_map,
-            input_pos=None,
+            input_pos=input_pos,
             len_starting_token=len_starting_token_ids,
             x=token.view(1, -1),
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
         )
-        token = torch.cat([token, new_token], dim=0)
-        tokens.append(new_token)
-        int_token = token[-1].item()
+        #token = torch.cat([token, new_token], dim=0)
+        tokens.append(token)
+        int_token = token.item()
 
         # Check for stop sequences
         # For each stop sequence, we keep a running total of how many are matched in stop_progress.
