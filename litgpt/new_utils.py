@@ -148,14 +148,15 @@ def process_eigenvectors_subtokens( eigvecs, num_of_nodes, indexing_map):
     for i, eigvec in enumerate(eigvecs):
         subtoken_indices = indexing_map[i]
         subtoken_eigvecs.extend([eigvec] * len(subtoken_indices))
-        for subtoken_index in subtoken_indices:
-            sinousoidal_encoding = positional_encoding(subtoken_index)
+        if sinousidial_encodings_dim != 0:
+            for subtoken_index in subtoken_indices:
+                sinousoidal_encoding = positional_encoding(subtoken_index)
 
-            # concatenate the eigenvector with the positional encoding
-            subtoken_eigvecs[global_subtoken_index] = np.concatenate(
-                (eigvec, sinousoidal_encoding)
-            )
-            global_subtoken_index += 1
+                # concatenate the eigenvector with the positional encoding
+                subtoken_eigvecs[global_subtoken_index] = np.concatenate(
+                    (eigvec, sinousoidal_encoding)
+                )
+                global_subtoken_index += 1
 
     return np.array(subtoken_eigvecs)
 
