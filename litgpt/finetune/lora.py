@@ -58,7 +58,7 @@ import pandas as pd
 def setup(
     checkpoint_dir: Path,
     out_dir: Path = Path("out/finetune/lora"),
-    precision: Optional[str] = None,
+    precision: Optional[str] = "32-true",
     quantize: Optional[
         Literal["bnb.nf4", "bnb.nf4-dq", "bnb.fp4", "bnb.fp4-dq", "bnb.int8-training"]
     ] = None,
@@ -586,6 +586,7 @@ def validate(
         print("Raw Corpus BLEU Score Cuts: ", raw_corpus_bleu_score_cuts)
     print("valid cut output number: ", len(predicted_outputs_cut))
     print("non valid cut output number: ", non_valid_number)
+    
     if len(outputs_cut) > 1000:
         df = pd.DataFrame()
         df["pred"] = predicted_outputs_cut
