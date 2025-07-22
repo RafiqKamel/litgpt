@@ -638,6 +638,14 @@ class GPT(BaseModel):
                 end_idx = (
                     start_idx + positional_encodings.shape[0]
                 )  # Calculate the end index based on pos_encodings length
+                if positional_encodings.shape[0] > x[i, start_idx:end_idx, :].shape[0]:
+                    print(
+                        f"Warning: Positional encodings length {positional_encodings.shape[0]} is greater than the "
+                        f"sequence length {x[i, start_idx:end_idx, :].shape[0]}"
+                    )
+                    positional_encodings = positional_encodings[
+                        : x[i, start_idx:end_idx, :].shape[0]
+                    ]  # Truncate the positional encodings
                 if x.shape[1] >= end_idx - start_idx:
                     x[i, start_idx:end_idx, :] += positional_encodings
                 else:
