@@ -442,6 +442,7 @@ def load_checkpoint(
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:
+        state_dict = lazy_load(checkpoint_path)
         if load_pos_encodings_weights:
             state_dict_positional = lazy_load(
                 checkpoint_path.parent / "pos_encoding_weights.pth"
@@ -450,7 +451,7 @@ def load_checkpoint(
                 state_dict_positional, "positional_encoding_mlp."
             )
             state_dict.update(state_dict_positional)
-        state_dict = lazy_load(checkpoint_path)
+        
         state_dict = state_dict.get("model", state_dict)
         model.load_state_dict(state_dict, strict=strict)
 
