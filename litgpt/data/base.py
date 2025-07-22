@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from litgpt.tokenizer import Tokenizer
 from litgpt.prompts import PromptStyle
 from unidecode import unidecode
-from litgpt.new_utils import create_indexing_map, starting_token_len, recreate_graph
+from litgpt.new_utils import create_indexing_map, starting_token_len, recreate_graph, nodewise_tokenize
 
 
 class DataModule(LightningDataModule):
@@ -74,6 +74,7 @@ class SFTDataset(Dataset):
             if direction == "amr2text"
             else "text2amr" if direction == "text2amr" else prompt_style
         )
+        prompt_style = "amr2text"
         print("prompt_style", prompt_style)
         print("mask_prompt", mask_prompt)
         self.prompt_style = (
@@ -108,20 +109,29 @@ class SFTDataset(Dataset):
             processed_instruction = instruction    
         processed_instruction = unidecode(processed_instruction)    
         output = unidecode(example["output"])
-        prompt = self.prompt_style.apply(prompt=processed_instruction, **example)
-        encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
+        prompt = self.prompt_style.apply(prompt=processed_instruction+" ", **example)
+        # encoded_prompt = self.tokenizer.encode(prompt, max_length=self.max_seq_length)
+        encoded_prompt = nodewise_tokenize(
+            prompt=instruction,
+            tokenizer=self.tokenizer,
+            prompt_style=self.prompt_style,
+        )
         encoded_response = self.tokenizer.encode(
             output, bos=False, eos=True, max_length=self.max_seq_length
         )
         encoded_prompt_and_response = torch.cat(
             (encoded_prompt, encoded_response)
         ).type(torch.int64)
-        # if (
-        #     self.max_seq_length > 0
-        # ):  # do not slice off last token when self.max_seq_length = -1
-        #     encoded_prompt_and_response = encoded_prompt_and_response[
-        #         : self.max_seq_length
-        #     ]
+        if self.tokenizer.decode(encoded_prompt_and_response) != prompt + output:
+            raise ValueError(
+                f"Prompt + output does not match the decoded input_ids: {self.tokenizer.decode(encoded_prompt_and_response)} != {prompt + output}"
+            )
+        if (
+            self.max_seq_length > 0
+        ):  # do not slice off last token when self.max_seq_length = -1
+            encoded_prompt_and_response = encoded_prompt_and_response[
+                : self.max_seq_length
+            ]
 
         # The labels are the full prompt with response, but with the prompt masked out
         labels = encoded_prompt_and_response.clone()
@@ -134,8 +144,11 @@ class SFTDataset(Dataset):
             )
         ) + len(encoded_response)
 
-        if "eigvecs" in example:
-           pass
+        if "starting_token_ids" in example:
+           len_starting_token_ids = example["len_starting_token_ids"]
+           starting_token_ids = example["starting_token_ids"]
+           indexing_map = example["indexing_map"]
+            
         else:
             G = recreate_graph(edge_list_str=example["graph_str"])
             num_of_nodes = len(G.nodes)
@@ -149,6 +162,7 @@ class SFTDataset(Dataset):
             )
             example["len_starting_token_ids"] = len_starting_token_ids
             example["starting_token_ids"] = starting_token_ids
+            example["indexing_map"] = indexing_map
 
         if len_starting_token_ids != 0:
             # check that the starting token ids are the same as the ones used in the prompt
