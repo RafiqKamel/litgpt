@@ -113,7 +113,14 @@ class GPT(nn.Module):
             mask = None
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        
+        if len(graph_str) != x.shape[0]:
+            raise ValueError(
+                f"Graph string length {len(graph_str)} does not match batch size {x.shape[0]}"
+            )
+        if len(indexing_map) != x.shape[0]:
+            raise ValueError(
+                f"Indexing map length {len(indexing_map)} does not match batch size {x.shape[0]}"
+            )    
         if add_positional_encodings:
           for i in range(x.shape[0]):  # Iterate over each batch
                 single_eig_vecs = prepare_eigvecs_datapoint(
@@ -139,9 +146,10 @@ class GPT(nn.Module):
                     x[i, start_idx:end_idx, :] += positional_encodings
                 else:
                     print("Warning: Sequence length is less than the positional encodings")
+                    pass
         else:
-            print("Not adding positional encodings")   
-                   
+            #print("Not adding positional encodings")   
+            pass      
         if self.config.scale_embeddings:
             x = x * torch.tensor(self.config.n_embd**0.5, dtype=x.dtype)
 
