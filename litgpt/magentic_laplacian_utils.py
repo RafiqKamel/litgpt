@@ -21,7 +21,7 @@ def magnetic_laplacian(G, q):
         return np.exp(2 * np.pi * q * 1j * (A - A.T))
 
     nodelist = sorted(G.nodes())
-    A_directed = nx.to_pandas_adjacency(G, nodelist=nodelist).to_numpy(dtype=np.float64)
+    A_directed = nx.to_pandas_adjacency(G, nodelist=nodelist).to_numpy()
     A_symmetric = A_directed + A_directed.T
     assert np.allclose(A_symmetric, A_symmetric.T)
     D_s = np.diag(np.sum(A_symmetric, axis=1))
