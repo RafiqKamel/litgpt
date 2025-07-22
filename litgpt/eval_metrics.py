@@ -42,12 +42,13 @@ def create_eval_dataframe(
 
 
 
-def bleu_scoring(preds, gold, tokenizer):
-    pred_token = [tokenizer.tokenize(str(p)) for p in preds]
-    gold_token = [tokenizer.tokenize(str(g)) for g in gold]
+def bleu_scoring(preds, gold):
     bleu_scorer = BLEUScorer()
+    pred_token = bleu_scorer.tokenize_strings(preds)
+    gold_token = bleu_scorer.tokenize_strings(gold)
+    
     bleu_score, ref_len, hyp_len = bleu_scorer.compute_bleu(refs=gold_token, hyps=pred_token)
-    return bleu_score
+    return bleu_score*100
 
 def spring_bleu_scoring(preds, gold):
     score = corpus_bleu(preds, [gold]).score
@@ -170,3 +171,41 @@ def get_entries(data):
         if string:
             entries.append(string)
     return entries
+
+def amr_graph_depth(df):
+    depth = [get_depth(amr) for amr in df["amr_graph"]]
+    return depth
+
+
+def get_depth(amr):
+   # Initialize a dictionary to store the graph structure
+    graph = {}
+
+    # Populate the graph structure
+    for s, _, t in amr.edges():
+        if s not in graph:
+            graph[s] = []
+        graph[s].append(t)
+
+    # Initialize a set to store visited nodes during DFS traversal
+    visited = set()
+
+    # Define a recursive depth-first search (DFS) function
+    def dfs(node, depth):
+        nonlocal max_depth
+        # Update max_depth if the current depth is greater
+        max_depth = max(max_depth, depth)
+        # Explore children nodes recursively
+        if node in graph:
+            for child in graph[node]:
+                if child not in visited:  # Avoid infinite recursion for reentrancies
+                    visited.add(child)  # Mark the node as visited
+                    dfs(child, depth + 1)
+                    # Remove the node from visited set after exploration
+                    visited.remove(child)
+
+    # Start DFS from the root node
+    max_depth = 0
+    dfs(amr.top, 0)
+
+    return max_depth
