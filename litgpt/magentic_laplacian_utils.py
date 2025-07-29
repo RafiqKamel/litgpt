@@ -1,7 +1,10 @@
 import numpy as np
 import networkx as nx
 from litgpt.positional_encodings_config import magentic_laplace_encodings_q
-
+from scipy.sparse.linalg import eigsh, eigs
+from scipy.linalg import eigh
+from scipy.sparse import issparse
+from scipy.sparse.linalg import eigsh
 
 def magnetic_laplacian(G, q):
     """
@@ -36,6 +39,13 @@ def magL_eigenvectors(MagL):
     _, eig_vecs = np.linalg.eigh(MagL)
     return eig_vecs
 
+def magL_eigenvectors_k(MagL, k):
+    n = MagL.shape[0]
+    k = min(k, n)  # Avoid requesting too many eigenvectors
+    MagL = MagL.astype(np.complex128)
+    w, v = eigh(MagL, subset_by_index=[0, k-1], driver="evr")
+    return v
+
 def stabilize_eigenvectors(vec):
     for i in range(vec.shape[1]):
         v = vec[:, i]
@@ -46,7 +56,7 @@ def stabilize_eigenvectors(vec):
 
 def magnetic_laplacian_eigenvectors(g, max_seq_len, num_of_eigenvecs,q=magentic_laplace_encodings_q):
     MagL = magnetic_laplacian(G=g, q=q)
-    vec = magL_eigenvectors(MagL)
+    vec = magL_eigenvectors_k(MagL, k = num_of_eigenvecs) if num_of_eigenvecs > 0 else magL_eigenvectors(MagL)
     vec = stabilize_eigenvectors(vec) 
     if num_of_eigenvecs > 0 and num_of_eigenvecs < vec.shape[1]:
         vec = vec[:, :num_of_eigenvecs]
